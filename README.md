@@ -1,6 +1,0 @@
-
-# Bank Management System (Team 11)
-
-A console-based Bank Management System written in C++17 for the Software Engineering mini project
-(PES University). It simulates basic banking operations with local file storage.
-See the SRS (Deliverable 1) and Software Test Plan for the full requirements.
