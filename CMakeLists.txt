@@ -15,15 +15,21 @@ else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# 1. Main executable
+add_executable(bms src/main.cpp)
+
+# 2. Automatically find all .cpp files in src/ (except main.cpp)
 file(GLOB_RECURSE BMS_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cpp")
 list(FILTER BMS_SOURCES EXCLUDE REGEX "/main\\.cpp$")
 
-add_library(bms_core STATIC ${BMS_SOURCES})
-target_include_directories(bms_core PUBLIC "${CMAKE_SOURCE_DIR}/include")
+# 3. Create the core library
+if(BMS_SOURCES)
+  add_library(bms_core STATIC ${BMS_SOURCES})
+  target_include_directories(bms_core PUBLIC "${CMAKE_SOURCE_DIR}/include")
+  target_link_libraries(bms PRIVATE bms_core)
+endif()
 
-add_executable(bms src/main.cpp)
-target_link_libraries(bms PRIVATE bms_core)
-
+# 4. Enable testing and load the tests folder
 enable_testing()
 if(EXISTS "${CMAKE_SOURCE_DIR}/tests/CMakeLists.txt")
   add_subdirectory(tests)
