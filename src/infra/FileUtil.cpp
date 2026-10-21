@@ -4,6 +4,12 @@
 #include <fstream>
 #include <system_error>
 #include <iterator>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 namespace fs = std::filesystem;
 namespace bms::infra {
 bool ensureDir(const std::string& dir) {
@@ -29,6 +35,12 @@ bool atomicWrite(const std::string& path, const std::string& contents) {
     } // file closed here
 
     std::error_code ec;
+#ifdef _WIN32
+    if (fs::exists(path) && ReplaceFileA(path.c_str(), tmp.c_str(), nullptr,
+                                         REPLACEFILE_WRITE_THROUGH, nullptr, nullptr)) {
+        return true;
+    }
+#endif
     fs::rename(tmp, path, ec);
     if (ec) {
         fs::remove(tmp, ec);
