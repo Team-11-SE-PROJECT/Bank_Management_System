@@ -17,3 +17,8 @@ add_executable(test_change_credentials test_change_credentials.cpp)
 target_link_libraries(test_change_credentials PRIVATE bms_core)
 target_include_directories(test_change_credentials PRIVATE "${CMAKE_SOURCE_DIR}/tests")
 add_test(NAME test_change_credentials COMMAND test_change_credentials)
+
+add_executable(test_session test_session.cpp)
+target_link_libraries(test_session PRIVATE bms_core)
+target_include_directories(test_session PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_session COMMAND test_session)
