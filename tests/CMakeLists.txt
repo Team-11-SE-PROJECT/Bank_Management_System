@@ -22,3 +22,8 @@ add_executable(test_session test_session.cpp)
 target_link_libraries(test_session PRIVATE bms_core)
 target_include_directories(test_session PRIVATE "${CMAKE_SOURCE_DIR}/tests")
 add_test(NAME test_session COMMAND test_session)
+
+add_executable(test_rbac test_rbac.cpp)
+target_link_libraries(test_rbac PRIVATE bms_core)
+target_include_directories(test_rbac PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_rbac COMMAND test_rbac)
