@@ -27,3 +27,8 @@ add_executable(test_rbac test_rbac.cpp)
 target_link_libraries(test_rbac PRIVATE bms_core)
 target_include_directories(test_rbac PRIVATE "${CMAKE_SOURCE_DIR}/tests")
 add_test(NAME test_rbac COMMAND test_rbac)
+
+add_executable(test_input_validator test_input_validator.cpp)
+target_link_libraries(test_input_validator PRIVATE bms_core)
+target_include_directories(test_input_validator PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_input_validator COMMAND test_input_validator)
