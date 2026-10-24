@@ -32,3 +32,11 @@ add_executable(test_input_validator test_input_validator.cpp)
 target_link_libraries(test_input_validator PRIVATE bms_core)
 target_include_directories(test_input_validator PRIVATE "${CMAKE_SOURCE_DIR}/tests")
 add_test(NAME test_input_validator COMMAND test_input_validator)
+
+add_executable(test_customer_account_store test_customer_account_store.cpp)
+target_link_libraries(test_customer_account_store PRIVATE bms_core)
+add_test(NAME test_customer_account_store COMMAND test_customer_account_store)
+
+add_executable(test_account_service test_account_service.cpp)
+target_link_libraries(test_account_service PRIVATE bms_core)
+add_test(NAME test_account_service COMMAND test_account_service)
