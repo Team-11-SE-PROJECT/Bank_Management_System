@@ -44,3 +44,8 @@ add_executable(test_account_unlock_service test_account_unlock_service.cpp)
 target_link_libraries(test_account_unlock_service PRIVATE bms_core)
 target_include_directories(test_account_unlock_service PRIVATE "${CMAKE_SOURCE_DIR}/tests")
 add_test(NAME test_account_unlock_service COMMAND test_account_unlock_service)
+
+add_executable(test_system_status_service test_system_status_service.cpp)
+target_link_libraries(test_system_status_service PRIVATE bms_core)
+target_include_directories(test_system_status_service PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_system_status_service COMMAND test_system_status_service)
