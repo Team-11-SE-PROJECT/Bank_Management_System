@@ -54,3 +54,7 @@ add_executable(test_transaction_service test_transaction_service.cpp)
 target_link_libraries(test_transaction_service PRIVATE bms_core)
 target_include_directories(test_transaction_service PRIVATE "${CMAKE_SOURCE_DIR}/tests")
 add_test(NAME test_transaction_service COMMAND test_transaction_service)
+
+add_executable(test_account_number_generator test_account_number_generator.cpp)
+target_link_libraries(test_account_number_generator PRIVATE bms_core)
+add_test(NAME test_account_number_generator COMMAND test_account_number_generator)
