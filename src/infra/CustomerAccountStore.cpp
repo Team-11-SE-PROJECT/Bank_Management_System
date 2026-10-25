@@ -2,11 +2,46 @@
 #include "infra/CustomerAccountStore.h"
 
 #include <sstream>
+#include <unordered_set>
 #include <utility>
 
 #include "infra/FileUtil.h"
+#include "infra/InputValidator.h"
 
 namespace bms::infra {
+
+namespace {
+
+bool validField(const std::string& value, bool required = true) {
+    if (required && value.empty()) {
+        return false;
+    }
+
+    return value.find('|') == std::string::npos &&
+           value.find('\n') == std::string::npos &&
+           value.find('\r') == std::string::npos;
+}
+
+bool validCustomer(const domain::Customer& customer) {
+    return validField(customer.customerId) &&
+           validField(customer.name) &&
+           validField(customer.phone) &&
+           validField(customer.address, false);
+}
+
+bool validAccount(const domain::Account& account) {
+    return validField(account.accountNo) &&
+           validField(account.customerId) &&
+           (account.status == "ACTIVE" ||
+            account.status == "CLOSED") &&
+           account.balancePaise >= 0 &&
+           account.balancePaise <= kMaxAmountPaise &&
+           account.withdrawnTodayPaise >= 0 &&
+           account.withdrawnTodayPaise <= kMaxAmountPaise &&
+           validField(account.lastWithdrawDate, false);
+}
+
+} // namespace
 
 CustomerAccountStore::CustomerAccountStore(
     std::string customersPath,
@@ -16,10 +51,12 @@ CustomerAccountStore::CustomerAccountStore(
       accountsPath_(std::move(accountsPath)) {}
 
 bool CustomerAccountStore::load() {
-    customers_.clear();
-    accounts_.clear();
-
+    std::vector<domain::Customer> loadedCustomers;
+    std::vector<domain::Account> loadedAccounts;
     std::string contents;
+
+    std::unordered_set<std::string> customerIds;
+    std::unordered_set<std::string> accountNumbers;
 
     if (readAll(customersPath_, contents)) {
         std::istringstream input(contents);
@@ -37,14 +74,12 @@ bool CustomerAccountStore::load() {
                 !std::getline(row, customer.name, '|') ||
                 !std::getline(row, customer.phone, '|') ||
                 !std::getline(row, customer.address) ||
-                customer.customerId.empty() ||
-                customer.name.empty() ||
-                customer.phone.empty()) {
-                customers_.clear();
+                !validCustomer(customer) ||
+                !customerIds.insert(customer.customerId).second) {
                 return false;
             }
 
-            customers_.push_back(customer);
+            loadedCustomers.push_back(customer);
         }
     }
 
@@ -62,43 +97,45 @@ bool CustomerAccountStore::load() {
             std::string balance;
             std::string withdrawn;
 
-            
-if (!std::getline(row, account.accountNo, '|') ||
-    !std::getline(row, account.customerId, '|') ||
-    !std::getline(row, balance, '|') ||
-    !std::getline(row, account.status, '|') ||
-    !std::getline(row, withdrawn, '|') ||
-    account.accountNo.empty() ||
-    account.customerId.empty()) {
-    accounts_.clear();
-    return false;
-}
+            if (!std::getline(row, account.accountNo, '|') ||
+                !std::getline(row, account.customerId, '|') ||
+                !std::getline(row, balance, '|') ||
+                !std::getline(row, account.status, '|') ||
+                !std::getline(row, withdrawn, '|')) {
+                return false;
+            }
 
-std::getline(row, account.lastWithdrawDate);
-
+            std::getline(row, account.lastWithdrawDate);
 
             try {
                 std::size_t balanceEnd = 0;
                 std::size_t withdrawnEnd = 0;
 
-                account.balancePaise = std::stoll(balance, &balanceEnd);
+                account.balancePaise =
+                    std::stoll(balance, &balanceEnd);
                 account.withdrawnTodayPaise =
                     std::stoll(withdrawn, &withdrawnEnd);
 
                 if (balanceEnd != balance.size() ||
                     withdrawnEnd != withdrawn.size()) {
-                    accounts_.clear();
                     return false;
                 }
             } catch (...) {
-                accounts_.clear();
                 return false;
             }
 
-            accounts_.push_back(account);
+            if (!validAccount(account) ||
+                !customerIds.count(account.customerId) ||
+                !accountNumbers.insert(account.accountNo).second) {
+                return false;
+            }
+
+            loadedAccounts.push_back(account);
         }
     }
 
+    customers_ = std::move(loadedCustomers);
+    accounts_ = std::move(loadedAccounts);
     return true;
 }
 
@@ -106,6 +143,10 @@ bool CustomerAccountStore::saveCustomers() const {
     std::string output;
 
     for (const auto& customer : customers_) {
+        if (!validCustomer(customer)) {
+            return false;
+        }
+
         output += customer.customerId + "|" +
                   customer.name + "|" +
                   customer.phone + "|" +
@@ -119,6 +160,11 @@ bool CustomerAccountStore::saveAccounts() const {
     std::string output;
 
     for (const auto& account : accounts_) {
+        if (!validAccount(account) ||
+            !customerExists(account.customerId)) {
+            return false;
+        }
+
         output += account.accountNo + "|" +
                   account.customerId + "|" +
                   std::to_string(account.balancePaise) + "|" +
@@ -140,12 +186,34 @@ CustomerAccountStore::accounts() const {
     return accounts_;
 }
 
+const domain::Customer* CustomerAccountStore::findCustomer(
+    const std::string& customerId
+) const {
+    for (const auto& customer : customers_) {
+        if (customer.customerId == customerId) {
+            return &customer;
+        }
+    }
+
+    return nullptr;
+}
+
+const domain::Account* CustomerAccountStore::findAccount(
+    const std::string& accountNo
+) const {
+    for (const auto& account : accounts_) {
+        if (account.accountNo == accountNo) {
+            return &account;
+        }
+    }
+
+    return nullptr;
+}
+
 bool CustomerAccountStore::addCustomer(
     const domain::Customer& customer
 ) {
-    if (customer.customerId.empty() ||
-        customer.name.empty() ||
-        customer.phone.empty() ||
+    if (!validCustomer(customer) ||
         customerExists(customer.customerId)) {
         return false;
     }
@@ -163,8 +231,7 @@ bool CustomerAccountStore::addCustomer(
 bool CustomerAccountStore::addAccount(
     const domain::Account& account
 ) {
-    if (account.accountNo.empty() ||
-        account.customerId.empty() ||
+    if (!validAccount(account) ||
         !customerExists(account.customerId) ||
         accountExists(account.accountNo)) {
         return false;
@@ -183,25 +250,13 @@ bool CustomerAccountStore::addAccount(
 bool CustomerAccountStore::customerExists(
     const std::string& customerId
 ) const {
-    for (const auto& customer : customers_) {
-        if (customer.customerId == customerId) {
-            return true;
-        }
-    }
-
-    return false;
+    return findCustomer(customerId) != nullptr;
 }
 
 bool CustomerAccountStore::accountExists(
     const std::string& accountNo
 ) const {
-    for (const auto& account : accounts_) {
-        if (account.accountNo == accountNo) {
-            return true;
-        }
-    }
-
-    return false;
+    return findAccount(accountNo) != nullptr;
 }
 
 } // namespace bms::infra

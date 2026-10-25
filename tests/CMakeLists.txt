@@ -58,3 +58,7 @@ add_test(NAME test_transaction_service COMMAND test_transaction_service)
 add_executable(test_account_number_generator test_account_number_generator.cpp)
 target_link_libraries(test_account_number_generator PRIVATE bms_core)
 add_test(NAME test_account_number_generator COMMAND test_account_number_generator)
+
+add_executable(test_account_details_service test_account_details_service.cpp)
+target_link_libraries(test_account_details_service PRIVATE bms_core)
+add_test(NAME test_account_details_service COMMAND test_account_details_service)

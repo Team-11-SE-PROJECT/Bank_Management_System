@@ -24,6 +24,14 @@ public:
     const std::vector<domain::Customer>& customers() const;
     const std::vector<domain::Account>& accounts() const;
 
+    const domain::Customer* findCustomer(
+        const std::string& customerId
+    ) const;
+
+    const domain::Account* findAccount(
+        const std::string& accountNo
+    ) const;
+
     bool addCustomer(const domain::Customer& customer);
     bool addAccount(const domain::Account& account);
 
