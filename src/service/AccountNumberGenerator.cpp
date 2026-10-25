@@ -10,8 +10,10 @@ namespace bms::service {
 std::string AccountNumberGenerator::generate(
     unsigned long long sequence
 ) {
-    if (sequence == 0) {
-        throw std::invalid_argument("Sequence must be positive");
+    if (sequence == 0 || sequence > 999999) {
+        throw std::invalid_argument(
+            "Sequence must be between 1 and 999999"
+        );
     }
 
     std::ostringstream result;
