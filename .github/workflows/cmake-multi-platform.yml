@@ -1,12 +1,11 @@
 
 name: CMake Build and Test
-
 on:
   push:
     branches: [main, "feature/**"]
   pull_request:
     branches: [main]
-
+  workflow_dispatch:
 jobs:
   build-and-test:
     runs-on: windows-latest
