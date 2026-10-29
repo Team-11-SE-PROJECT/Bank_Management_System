@@ -30,6 +30,7 @@ static void test_change_credentials() {
 
     // 3. Test invalid new PIN (too short)
     CHECK(auth.changeCredentials("testuser", "1234", "12") == Status::INVALID_INPUT);
+    CHECK(auth.changeCredentials("testuser", "1234", "12AB") == Status::INVALID_INPUT);
 
     // 4. Test successful change
     CHECK(auth.changeCredentials("testuser", "1234", "5678") == Status::OK);

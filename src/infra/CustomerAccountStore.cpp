@@ -170,7 +170,9 @@ bool CustomerAccountStore::saveAccounts() const {
                   std::to_string(account.balancePaise) + "|" +
                   account.status + "|" +
                   std::to_string(account.withdrawnTodayPaise) + "|" +
-                  account.lastWithdrawDate + "\n";
+                  (account.lastWithdrawDate.empty()
+                       ? "-"
+                       : account.lastWithdrawDate) + "\n";
     }
 
     return atomicWrite(accountsPath_, output);
