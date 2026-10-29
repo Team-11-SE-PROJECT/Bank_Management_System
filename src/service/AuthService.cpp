@@ -1,5 +1,6 @@
 #include "service/AuthService.h"
 #include "infra/PasswordHasher.h"
+#include <cctype>
 using namespace bms::domain;
 using namespace bms::infra;
 namespace bms::service {
@@ -21,6 +22,11 @@ Status AuthService::changeCredentials(const std::string& userId,
     // 3. Validate the new PIN (4-6 digits, based on SAD/config)
     if (newPin.length() < 4 || newPin.length() > 6) {
         return Status::INVALID_INPUT; 
+    }
+    for (unsigned char ch : newPin) {
+        if (!std::isdigit(ch)) {
+            return Status::INVALID_INPUT;
+        }
     }
 
     // 4. Hash the new PIN with a fresh salt

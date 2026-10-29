@@ -11,14 +11,22 @@
 #include <unistd.h>
 #endif
 
+#include "domain/Status.h"
 #include "infra/AccountRepository.h"
 #include "infra/AuditLogger.h"
 #include "infra/Config.h"
 #include "infra/CredentialStore.h"
+#include "infra/CustomerAccountStore.h"
 #include "infra/InputValidator.h"
 #include "infra/LoadStatus.h"
 #include "infra/LoginService.h"
 #include "infra/TransactionRepository.h"
+#include "service/AccountDetailsService.h"
+#include "service/AccountService.h"
+#include "service/AccountUnlockService.h"
+#include "service/AuthService.h"
+#include "service/SessionManager.h"
+#include "service/SystemStatusService.h"
 #include "service/TransactionService.h"
 
 namespace {
@@ -203,11 +211,102 @@ void showResult(const TxnResult& result) {
               << rupees(result.newBalancePaise) << '\n';
 }
 
+bool prompt(const char* label, std::string& value) {
+    std::cout << label;
+    return static_cast<bool>(std::getline(std::cin, value));
+}
+
+void showDomainStatus(bms::domain::Status status) {
+    using bms::domain::Status;
+
+    switch (status) {
+        case Status::OK:
+            std::cout << "Operation successful.\n";
+            break;
+        case Status::UNAUTHORIZED:
+            std::cout << "Access denied.\n";
+            break;
+        case Status::INVALID_INPUT:
+            std::cout << "Invalid input. Please check the entered values.\n";
+            break;
+        case Status::NOT_FOUND:
+            std::cout << "User or record not found.\n";
+            break;
+        case Status::STORAGE_FAILURE:
+            std::cout << "Storage error. Please check the data files.\n";
+            break;
+    }
+}
+
+bool changePin(
+    const std::string& userId,
+    bms::service::AuthService& service
+) {
+    std::string oldPin;
+    std::string newPin;
+
+    std::cout << "Current PIN: ";
+    if (!readMaskedPassword(oldPin)) return false;
+    std::cout << "New PIN (4-6 digits): ";
+    if (!readMaskedPassword(newPin)) return false;
+
+    const auto status = service.changeCredentials(userId, oldPin, newPin);
+    if (status == bms::domain::Status::OK) {
+        std::cout << "PIN changed successfully.\n";
+    } else if (status == bms::domain::Status::UNAUTHORIZED) {
+        std::cout << "Current PIN is incorrect.\n";
+    } else {
+        showDomainStatus(status);
+    }
+    return true;
+}
+
+void showAccountDetails(
+    const std::string& userId,
+    const std::string& accountNo,
+    bms::infra::CustomerAccountStore& customerData
+) {
+    if (!customerData.load()) {
+        std::cerr << "Could not load customer and account details.\n";
+        return;
+    }
+
+    const bms::service::AccountDetailsService service(customerData);
+    const auto result = service.getByAccountNumber(accountNo, userId);
+
+    switch (result.status) {
+        case bms::service::AccountDetailsStatus::OK:
+            std::cout << "\n--- Account Details ---\n"
+                      << "Customer ID: " << result.customer.customerId << '\n'
+                      << "Name: " << result.customer.name << '\n'
+                      << "Phone: " << result.customer.phone << '\n'
+                      << "Address: " << result.customer.address << '\n'
+                      << "Account number: " << result.account.accountNo << '\n'
+                      << "Account status: " << result.account.status << '\n'
+                      << "Balance: " << rupees(result.account.balancePaise)
+                      << '\n';
+            break;
+        case bms::service::AccountDetailsStatus::INVALID_INPUT:
+            std::cout << "Account number or customer ID is missing.\n";
+            break;
+        case bms::service::AccountDetailsStatus::NOT_FOUND:
+            std::cout << "Account details not found.\n";
+            break;
+        case bms::service::AccountDetailsStatus::UNAUTHORIZED:
+            std::cout << "You can only view your own account details.\n";
+            break;
+    }
+}
+
 void customerMenu(
     const std::string& userId,
     bms::infra::AccountRepository& accounts,
-    bms::service::TransactionService& service
+    bms::service::TransactionService& service,
+    bms::infra::CustomerAccountStore& customerData,
+    bms::service::AuthService& authService
 ) {
+    if (!loadOrReport(accounts, "data/accounts.dat")) return;
+
     // The project design uses the login user ID as customerId.
     const auto* account = accounts.findByCustomer(userId);
 
@@ -225,6 +324,8 @@ void customerMenu(
                   << "1. Check balance\n"
                   << "2. Deposit\n"
                   << "3. Withdraw\n"
+                  << "4. View account details\n"
+                  << "5. Change PIN\n"
                   << "0. Logout\n"
                   << "Choice: ";
 
@@ -235,6 +336,16 @@ void customerMenu(
 
         if (choice == "1") {
             showResult(service.getBalance(accountNo));
+            continue;
+        }
+
+        if (choice == "4") {
+            showAccountDetails(userId, accountNo, customerData);
+            continue;
+        }
+
+        if (choice == "5") {
+            if (!changePin(userId, authService)) return;
             continue;
         }
 
@@ -287,6 +398,132 @@ void customerMenu(
     }
 }
 
+void adminMenu(
+    const std::string& userId,
+    bms::service::SessionManager& session,
+    bms::service::AccountService& accountService,
+    bms::service::AccountUnlockService& unlockService,
+    bms::service::SystemStatusService& systemStatusService,
+    bms::service::AuthService& authService,
+    bms::infra::CredentialStore& credentials,
+    bms::infra::CustomerAccountStore& customerData,
+    bms::infra::AccountRepository& accounts
+) {
+    session.login(userId, bms::infra::Role::ADMIN, 300);
+
+    while (true) {
+        std::cout << "\n--- Admin Menu ---\n"
+                  << "1. Create customer account\n"
+                  << "2. Unlock customer login\n"
+                  << "3. View system status\n"
+                  << "4. Change admin PIN\n"
+                  << "0. Logout\n"
+                  << "Choice: ";
+
+        std::string choice;
+        if (!std::getline(std::cin, choice)) {
+            session.logout();
+            return;
+        }
+
+        if (choice == "0") {
+            session.logout();
+            return;
+        }
+
+        if (choice == "1") {
+            bms::service::CustomerInfo info;
+            if (!prompt("Customer full name: ", info.name) ||
+                !prompt("Phone (10 digits): ", info.phone) ||
+                !prompt("Address: ", info.address)) {
+                session.logout();
+                return;
+            }
+            std::cout << "Initial customer PIN (4-6 digits): ";
+            if (!readMaskedPassword(info.initialPin)) {
+                session.logout();
+                return;
+            }
+
+            std::string accountNo;
+            const auto status =
+                accountService.createAccount(info, accountNo);
+            showDomainStatus(status);
+            if (status == bms::domain::Status::OK) {
+                if (!loadOrReport(accounts, "data/accounts.dat")) {
+                    session.logout();
+                    return;
+                }
+                const auto* account = accounts.find(accountNo);
+                if (account == nullptr) {
+                    std::cerr << "Created account could not be reloaded.\n";
+                    continue;
+                }
+                std::cout << "Customer login ID: " << account->customerId
+                          << '\n'
+                          << "Account number: " << accountNo << '\n'
+                          << "Opening balance: Rs. 0.00\n";
+            }
+            continue;
+        }
+
+        if (choice == "2") {
+            std::string targetUserId;
+            if (!prompt("Customer login ID to unlock: ", targetUserId)) {
+                session.logout();
+                return;
+            }
+            showDomainStatus(
+                unlockService.unlockAccount(session, targetUserId)
+            );
+            continue;
+        }
+
+        if (choice == "3") {
+            if (!credentials.load() || !customerData.load()) {
+                std::cerr << "Could not read system data files.\n";
+                continue;
+            }
+
+            bms::service::SystemStatus status;
+            const auto result =
+                systemStatusService.getStatus(session, status);
+            if (result != bms::domain::Status::OK) {
+                showDomainStatus(result);
+                continue;
+            }
+
+            std::cout << "\n--- System Status ---\n"
+                      << "Application running: "
+                      << (status.applicationRunning ? "Yes" : "No") << '\n'
+                      << "Credentials file accessible: "
+                      << (status.credentialsFileAccessible ? "Yes" : "No")
+                      << '\n'
+                      << "Customers file accessible: "
+                      << (status.customersFileAccessible ? "Yes" : "No")
+                      << '\n'
+                      << "Accounts file accessible: "
+                      << (status.accountsFileAccessible ? "Yes" : "No")
+                      << '\n'
+                      << "Credential records: " << status.credentialCount
+                      << '\n'
+                      << "Customers: " << status.customerCount << '\n'
+                      << "Accounts: " << status.accountCount << '\n';
+            continue;
+        }
+
+        if (choice == "4") {
+            if (!changePin(userId, authService)) {
+                session.logout();
+                return;
+            }
+            continue;
+        }
+
+        std::cout << "Invalid choice.\n";
+    }
+}
+
 } // namespace
 
 int main() {
@@ -331,8 +568,27 @@ int main() {
         accounts, transactions, config, audit
     );
 
+    bms::infra::CustomerAccountStore customerData(
+        "data/customers.dat", "data/accounts.dat"
+    );
+    bms::service::AccountService accountService(customerData, credentials);
+    bms::service::AccountUnlockService unlockService(credentials);
+    bms::service::AuthService authService(credentials);
+    bms::service::SystemStatusService systemStatusService(
+        credentials,
+        customerData,
+        "data/credentials.dat",
+        "data/customers.dat",
+        "data/accounts.dat"
+    );
+    bms::service::SessionManager session;
+
     while (true) {
         std::cout << "\nBank Management System\n"
+                  << "Customer features after login: balance, deposit, withdraw, "
+                     "account details, change PIN\n"
+                  << "Admin features after login: create account, unlock login, "
+                     "system status, change PIN\n"
                   << "1. Customer login\n"
                   << "2. Admin login\n"
                   << "0. Exit\n"
@@ -350,14 +606,32 @@ int main() {
                     loginService,
                     bms::infra::Role::CUSTOMER,
                     userId)) {
-                customerMenu(userId, accounts, transactionService);
+                session.login(userId, bms::infra::Role::CUSTOMER, 300);
+                customerMenu(
+                    userId,
+                    accounts,
+                    transactionService,
+                    customerData,
+                    authService
+                );
+                session.logout();
             }
         } else if (selection == "2") {
             if (login(
                     loginService,
                     bms::infra::Role::ADMIN,
                     userId)) {
-                std::cout << "Admin session authenticated.\n";
+                adminMenu(
+                    userId,
+                    session,
+                    accountService,
+                    unlockService,
+                    systemStatusService,
+                    authService,
+                    credentials,
+                    customerData,
+                    accounts
+                );
             }
         } else {
             std::cout << "Invalid selection.\n";

@@ -3,6 +3,7 @@
 #include <string>
 
 #include "domain/Status.h"
+#include "infra/AccountRepository.h"
 #include "infra/CredentialStore.h"
 #include "infra/CustomerAccountStore.h"
 #include "infra/PasswordHasher.h"
@@ -44,6 +45,16 @@ int main() {
         dataStore.customers().size() != 1 ||
         dataStore.accounts().size() != 1) {
         std::cerr << "FAIL: customer or account was not saved\n";
+        std::filesystem::remove_all(testDir);
+        return 1;
+    }
+
+    bms::infra::AccountRepository accountRepository(
+        testDir + "/accounts.dat"
+    );
+    if (accountRepository.load() != bms::infra::LoadStatus::OK ||
+        accountRepository.all().size() != 1) {
+        std::cerr << "FAIL: created account could not be loaded by banking services\n";
         std::filesystem::remove_all(testDir);
         return 1;
     }
