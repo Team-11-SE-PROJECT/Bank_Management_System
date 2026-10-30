@@ -1,2 +1,4 @@
 build/
+build*/
 data/credentials.dat
+*.corrupt.bak
