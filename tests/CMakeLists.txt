@@ -57,3 +57,38 @@ add_test(NAME test_account_number_generator COMMAND test_account_number_generato
 add_executable(test_account_details_service test_account_details_service.cpp)
 target_link_libraries(test_account_details_service PRIVATE bms_core)
 add_test(NAME test_account_details_service COMMAND test_account_details_service)
+
+add_executable(test_data_format test_data_format.cpp)
+target_link_libraries(test_data_format PRIVATE bms_core)
+target_include_directories(test_data_format PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_data_format COMMAND test_data_format)
+
+add_executable(test_atomic_save test_atomic_save.cpp)
+target_link_libraries(test_atomic_save PRIVATE bms_core)
+target_include_directories(test_atomic_save PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_atomic_save COMMAND test_atomic_save)
+
+add_executable(test_data_integrity test_data_integrity.cpp)
+target_link_libraries(test_data_integrity PRIVATE bms_core)
+target_include_directories(test_data_integrity PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_data_integrity COMMAND test_data_integrity)
+
+add_executable(test_startup_loading test_startup_loading.cpp)
+target_link_libraries(test_startup_loading PRIVATE bms_core)
+target_include_directories(test_startup_loading PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_startup_loading COMMAND test_startup_loading)
+
+add_executable(test_persistence test_persistence.cpp)
+target_link_libraries(test_persistence PRIVATE bms_core)
+target_include_directories(test_persistence PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_persistence COMMAND test_persistence)
+
+add_executable(test_file_error_handling test_file_error_handling.cpp)
+target_link_libraries(test_file_error_handling PRIVATE bms_core)
+target_include_directories(test_file_error_handling PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_file_error_handling COMMAND test_file_error_handling)
+
+add_executable(test_journal_recovery test_journal_recovery.cpp)
+target_link_libraries(test_journal_recovery PRIVATE bms_core)
+target_include_directories(test_journal_recovery PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_journal_recovery COMMAND test_journal_recovery)

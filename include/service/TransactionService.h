@@ -6,6 +6,7 @@
 #include "infra/AccountRepository.h"
 #include "infra/AuditLogger.h"
 #include "infra/Config.h"
+#include "infra/Journal.h"
 #include "infra/TimeUtil.h"
 #include "infra/TransactionRepository.h"
 
@@ -38,8 +39,13 @@ public:
         infra::TransactionRepository& txns,
         const infra::Config& config,
         const infra::AuditLogger& audit,
-        Clock clock = &infra::nowTimestamp
+        Clock clock = &infra::nowTimestamp,
+        infra::Journal* journal = nullptr
     );
+
+    void setJournal(infra::Journal* journal) {
+        journal_ = journal;
+    }
 
     TxnResult deposit(
         const std::string& accountNo,
@@ -74,6 +80,7 @@ private:
     const infra::Config& config_;
     const infra::AuditLogger& audit_;
     Clock clock_;
+    infra::Journal* journal_ = nullptr;
 };
 
 const char* toString(TxnStatus status);
