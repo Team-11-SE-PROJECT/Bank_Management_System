@@ -30,13 +30,15 @@ TransactionService::TransactionService(
     infra::TransactionRepository& txns,
     const infra::Config& config,
     const infra::AuditLogger& audit,
-    Clock clock
+    Clock clock,
+    infra::Journal* journal
 )
     : accounts_(accounts),
       txns_(txns),
       config_(config),
       audit_(audit),
-      clock_(std::move(clock)) {}
+      clock_(std::move(clock)),
+      journal_(journal) {}
 
 TxnResult TransactionService::fail(
     TxnStatus status,
@@ -205,7 +207,37 @@ TxnResult TransactionService::finish(
     txn.balanceAfterPaise = updated.balancePaise;
     txn.state = TxnState::PENDING;
 
+    std::string jrnId;
+    if (journal_) {
+        jrnId = journal_->nextJournalId();
+        domain::JournalEntry jPending{
+            jrnId,
+            txn.txnId,
+            domain::toString(txn.type),
+            txn.counterparty,
+            updated.accountNo,
+            txn.amountPaise,
+            domain::JournalState::PENDING,
+            txn.timestamp
+        };
+        if (!journal_->append(jPending)) {
+            return fail(
+                TxnStatus::STORAGE_FAILURE,
+                domain::toString(txn.type),
+                updated.accountNo, txn.amountPaise
+            );
+        }
+    }
+
     if (!txns_.append(txn)) {
+        if (journal_) {
+            domain::JournalEntry jAbort{
+                jrnId, txn.txnId, domain::toString(txn.type),
+                txn.counterparty, updated.accountNo, txn.amountPaise,
+                domain::JournalState::ABORTED, clock_()
+            };
+            journal_->append(jAbort);
+        }
         return fail(
             TxnStatus::STORAGE_FAILURE,
             domain::toString(txn.type),
@@ -213,10 +245,31 @@ TxnResult TransactionService::finish(
         );
     }
 
+    // Step 2: Apply account balance changes in memory
     accounts_.upsert(updated);
 
+    // Step 3: Write APPLIED journal entry
+    if (journal_) {
+        domain::JournalEntry jApplied{
+            jrnId, txn.txnId, domain::toString(txn.type),
+            txn.counterparty, updated.accountNo, txn.amountPaise,
+            domain::JournalState::APPLIED, clock_()
+        };
+        journal_->append(jApplied);
+    }
+
+    // Step 4: Persist accounts (atomic save)
     if (!accounts_.save()) {
         accounts_.upsert(previous);
+
+        if (journal_) {
+            domain::JournalEntry jAbort{
+                jrnId, txn.txnId, domain::toString(txn.type),
+                txn.counterparty, updated.accountNo, txn.amountPaise,
+                domain::JournalState::ABORTED, clock_()
+            };
+            journal_->append(jAbort);
+        }
 
         txn.state = TxnState::ABORTED;
         txns_.append(txn);
@@ -228,6 +281,7 @@ TxnResult TransactionService::finish(
         );
     }
 
+    // Step 5: Write transaction record (COMMITTED)
     txn.state = TxnState::COMMITTED;
 
     if (!txns_.append(txn)) {
@@ -237,6 +291,16 @@ TxnResult TransactionService::finish(
             "WARNING",
             txn.txnId
         );
+    }
+
+    // Step 6: Write COMMITTED journal entry
+    if (journal_) {
+        domain::JournalEntry jCommitted{
+            jrnId, txn.txnId, domain::toString(txn.type),
+            txn.counterparty, updated.accountNo, txn.amountPaise,
+            domain::JournalState::COMMITTED, clock_()
+        };
+        journal_->append(jCommitted);
     }
 
     audit_.log(

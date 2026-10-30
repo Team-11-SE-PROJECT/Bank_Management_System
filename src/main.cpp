@@ -18,6 +18,7 @@
 #include "infra/CredentialStore.h"
 #include "infra/CustomerAccountStore.h"
 #include "infra/InputValidator.h"
+#include "infra/Journal.h"
 #include "infra/LoadStatus.h"
 #include "infra/LoginService.h"
 #include "infra/TransactionRepository.h"
@@ -562,15 +563,34 @@ int main() {
         return 1;
     }
 
+    bms::infra::CustomerAccountStore customerData(
+        "data/customers.dat", "data/accounts.dat"
+    );
+    const auto custStatus = customerData.loadWithStatus();
+    if (custStatus == bms::infra::LoadStatus::CORRUPT) {
+        std::cerr << "Error loading customer data: "
+                  << customerData.lastStatus().errorMessage << "\n";
+        return 1;
+    }
+
     bms::infra::AuditLogger audit("data/audit.log");
+
+    bms::infra::Journal journal("data/journal.dat");
+    const auto journalStatus = journal.load();
+    if (journalStatus == bms::infra::LoadStatus::CORRUPT) {
+        std::cerr << "Error loading journal: " << journal.lastError() << "\n";
+        return 1;
+    }
+
+    int recovered = bms::infra::Journal::recover(journal, accounts, transactions, &audit);
+    if (recovered > 0) {
+        std::cout << "Crash recovery complete: " << recovered << " journal entries reconciled.\n";
+    }
 
     bms::service::TransactionService transactionService(
         accounts, transactions, config, audit
     );
-
-    bms::infra::CustomerAccountStore customerData(
-        "data/customers.dat", "data/accounts.dat"
-    );
+    transactionService.setJournal(&journal);
     bms::service::AccountService accountService(customerData, credentials);
     bms::service::AccountUnlockService unlockService(credentials);
     bms::service::AuthService authService(credentials);
