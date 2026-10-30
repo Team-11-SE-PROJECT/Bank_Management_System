@@ -1,6 +1,7 @@
 #include "infra/TransactionRepository.h"
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -8,6 +9,8 @@
 
 #include "infra/DataFormat.h"
 #include "infra/FileUtil.h"
+
+namespace fs = std::filesystem;
 
 namespace bms::infra {
 
@@ -24,34 +27,38 @@ bool parseTxnNumber(
     return format::parseNonNegative(id.substr(3), number);
 }
 
-std::string toLine(const domain::Transaction& t) {
-    return format::join({
-        t.txnId,
-        domain::toString(t.type),
-        t.accountNo,
-        t.counterparty,
-        std::to_string(t.amountPaise),
-        std::to_string(t.balanceAfterPaise),
-        t.timestamp,
-        domain::toString(t.state)
-    });
-}
-
 } // namespace
 
 LoadStatus TransactionRepository::load() {
     records_.clear();
     error_.clear();
+    status_ = LoadStatus::OK;
+
+    std::error_code ec;
+    if (!fs::exists(path_, ec)) {
+        status_ = LoadStatus(LoadErrorCode::MISSING, "File not found: " + path_, 0, path_);
+        return status_;
+    }
 
     std::string contents;
     if (!readAll(path_, contents)) {
-        return LoadStatus::MISSING;
+        error_ = "Cannot read file (access denied or unreadable): " + path_;
+        status_ = LoadStatus(LoadErrorCode::IO_ERROR, error_, 0, path_);
+        return status_;
     }
+
+    if (contents.empty()) {
+        status_ = LoadStatus::OK;
+        return status_;
+    }
+
+    const bool missingTrailingNewline = (contents.back() != '\n');
 
     std::istringstream in(contents);
     std::string line;
     int lineNo = 0;
     std::vector<domain::Transaction> parsed;
+    bool checkedHeader = false;
 
     while (std::getline(in, line)) {
         ++lineNo;
@@ -62,83 +69,70 @@ LoadStatus TransactionRepository::load() {
 
         if (line.empty()) continue;
 
-        const std::string at =
-            path_ + " line " + std::to_string(lineNo) + ": ";
-
-        const auto f = format::split(line);
-
-        if (f.size() != format::kTransactionFields) {
-            error_ = at + "expected 8 fields but found " +
-                     std::to_string(f.size());
-            return LoadStatus::CORRUPT;
+        if (!checkedHeader && format::isVersionHeader(line)) {
+            checkedHeader = true;
+            int version = 0;
+            std::string verErr;
+            if (!format::parseVersionHeader(line, version, verErr)) {
+                error_ = path_ + " line " + std::to_string(lineNo) + ": " + verErr;
+                std::string quarantine;
+                quarantineFile(path_, quarantine);
+                status_ = LoadStatus(LoadErrorCode::MALFORMED, error_, lineNo, path_, quarantine);
+                return status_;
+            }
+            if (version > format::kTransactionVersion) {
+                error_ = path_ + " line " + std::to_string(lineNo) + ": Unsupported version " + std::to_string(version);
+                status_ = LoadStatus(LoadErrorCode::UNSUPPORTED_VERSION, error_, lineNo, path_);
+                return status_;
+            }
+            continue;
         }
+        checkedHeader = true;
 
         domain::Transaction t;
-        long long number = 0;
-
-        if (!parseTxnNumber(f[0], number)) {
-            error_ = at + "bad transaction id";
-            return LoadStatus::CORRUPT;
-        }
-
-        t.txnId = f[0];
-
-        if (!domain::txnTypeFromString(f[1], t.type)) {
-            error_ = at + "bad type";
-            return LoadStatus::CORRUPT;
-        }
-
-        if (f[2].empty()) {
-            error_ = at + "account number is empty";
-            return LoadStatus::CORRUPT;
-        }
-
-        t.accountNo = f[2];
-        t.counterparty = f[3];
-
-        if (!format::parseNonNegative(
-                f[4], t.amountPaise) ||
-            t.amountPaise == 0) {
-            error_ = at +
-                "amount must be a positive whole number of paise";
-            return LoadStatus::CORRUPT;
-        }
-
-        if (!format::parseNonNegative(
-                f[5], t.balanceAfterPaise)) {
-            error_ = at +
-                "balanceAfter must be a non-negative whole number";
-            return LoadStatus::CORRUPT;
-        }
-
-        if (!format::isTimestamp(f[6])) {
-            error_ = at + "bad timestamp";
-            return LoadStatus::CORRUPT;
-        }
-
-        t.timestamp = f[6];
-
-        if (!domain::txnStateFromString(f[7], t.state)) {
-            error_ = at + "bad state";
-            return LoadStatus::CORRUPT;
+        auto parseStatus = format::deserializeTransaction(line, t, lineNo);
+        if (!parseStatus.isOk()) {
+            if (missingTrailingNewline && in.eof()) {
+                error_ = path_ + " line " + std::to_string(lineNo) + ": Truncated record: " + parseStatus.errorMessage;
+            } else {
+                error_ = path_ + " line " + std::to_string(lineNo) + ": " + parseStatus.errorMessage;
+            }
+            std::string quarantine;
+            quarantineFile(path_, quarantine);
+            status_ = LoadStatus(LoadErrorCode::MALFORMED, error_, lineNo, path_, quarantine);
+            return status_;
         }
 
         parsed.push_back(t);
     }
 
     records_ = std::move(parsed);
-    return LoadStatus::OK;
+    status_ = LoadStatus::OK;
+    return status_;
 }
 
 bool TransactionRepository::append(
     const domain::Transaction& txn) {
+    std::string line;
+    std::string err;
+    if (!format::serializeTransaction(txn, line, err)) {
+        return false;
+    }
+
+    std::error_code ec;
+    const bool isNewFile = !fs::exists(path_, ec);
+
     {
         std::ofstream out(
             path_, std::ios::app | std::ios::binary);
 
         if (!out) return false;
 
-        out << toLine(txn) << '\n';
+        if (isNewFile) {
+            out << format::makeVersionHeader(format::kTransactionVersion) << '\n';
+        }
+
+        out << line << '\n';
         out.flush();
 
         if (!out) return false;
@@ -146,6 +140,19 @@ bool TransactionRepository::append(
 
     records_.push_back(txn);
     return true;
+}
+
+bool TransactionRepository::saveAll() const {
+    std::string out = format::makeVersionHeader(format::kTransactionVersion) + "\n";
+    for (const auto& t : records_) {
+        std::string line;
+        std::string err;
+        if (!format::serializeTransaction(t, line, err)) {
+            return false;
+        }
+        out += line + "\n";
+    }
+    return atomicWrite(path_, out);
 }
 
 std::string TransactionRepository::nextTxnId() const {

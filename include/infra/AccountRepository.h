@@ -21,6 +21,10 @@ public:
         return error_;
     }
 
+    const LoadStatus& lastStatus() const {
+        return status_;
+    }
+
     const domain::Account* find(
         const std::string& accountNo) const;
 
@@ -44,6 +48,7 @@ private:
     std::string path_;
     std::vector<domain::Account> records_;
     std::string error_;
+    LoadStatus status_;
 };
 
 } // namespace bms::infra

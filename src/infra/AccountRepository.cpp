@@ -1,10 +1,13 @@
 #include "infra/AccountRepository.h"
 
+#include <filesystem>
 #include <sstream>
 #include <utility>
 
 #include "infra/DataFormat.h"
 #include "infra/FileUtil.h"
+
+namespace fs = std::filesystem;
 
 namespace bms::infra {
 
@@ -24,16 +27,35 @@ std::string where(
 LoadStatus AccountRepository::load() {
     records_.clear();
     error_.clear();
+    status_ = LoadStatus::OK;
+
+    std::error_code ec;
+    if (!fs::exists(path_, ec)) {
+        status_ = LoadStatus(LoadErrorCode::MISSING, "File not found: " + path_, 0, path_);
+        return status_;
+    }
 
     std::string contents;
     if (!readAll(path_, contents)) {
-        return LoadStatus::MISSING;
+        error_ = "Cannot read file (access denied or unreadable): " + path_;
+        status_ = LoadStatus(LoadErrorCode::IO_ERROR, error_, 0, path_);
+        return status_;
     }
+
+    // Empty file is valid (0 records)
+    if (contents.empty()) {
+        status_ = LoadStatus::OK;
+        return status_;
+    }
+
+    // Check for truncated file (ends abruptly without newline and last line is incomplete)
+    const bool missingTrailingNewline = (contents.back() != '\n');
 
     std::istringstream in(contents);
     std::string line;
     int lineNo = 0;
     std::vector<domain::Account> parsed;
+    bool checkedHeader = false;
 
     while (std::getline(in, line)) {
         ++lineNo;
@@ -44,66 +66,47 @@ LoadStatus AccountRepository::load() {
 
         if (line.empty()) continue;
 
-        const auto f = format::split(line);
-
-        if (f.size() != format::kAccountFields) {
-            error_ = where(
-                path_, lineNo,
-                "expected 6 fields but found " +
-                std::to_string(f.size()));
-            return LoadStatus::CORRUPT;
+        if (!checkedHeader && format::isVersionHeader(line)) {
+            checkedHeader = true;
+            int version = 0;
+            std::string verErr;
+            if (!format::parseVersionHeader(line, version, verErr)) {
+                error_ = where(path_, lineNo, verErr);
+                std::string quarantine;
+                quarantineFile(path_, quarantine);
+                status_ = LoadStatus(LoadErrorCode::MALFORMED, error_, lineNo, path_, quarantine);
+                return status_;
+            }
+            if (version > format::kAccountVersion) {
+                error_ = where(path_, lineNo, "Unsupported version " + std::to_string(version));
+                status_ = LoadStatus(LoadErrorCode::UNSUPPORTED_VERSION, error_, lineNo, path_);
+                return status_;
+            }
+            continue;
         }
+        checkedHeader = true;
 
         domain::Account a;
-        a.accountNo = f[0];
-        a.customerId = f[1];
-
-        if (a.accountNo.empty() || a.customerId.empty()) {
-            error_ = where(
-                path_, lineNo,
-                "account number and customer id must not be empty");
-            return LoadStatus::CORRUPT;
+        auto parseStatus = format::deserializeAccount(line, a, lineNo);
+        if (!parseStatus.isOk()) {
+            if (missingTrailingNewline && in.eof()) {
+                error_ = where(path_, lineNo, "Truncated record at end of file: " + parseStatus.errorMessage);
+            } else {
+                error_ = where(path_, lineNo, parseStatus.errorMessage);
+            }
+            std::string quarantine;
+            quarantineFile(path_, quarantine);
+            status_ = LoadStatus(LoadErrorCode::MALFORMED, error_, lineNo, path_, quarantine);
+            return status_;
         }
-
-        if (!format::parseNonNegative(f[2], a.balancePaise)) {
-            error_ = where(
-                path_, lineNo,
-                "balance must be a non-negative whole number of paise");
-            return LoadStatus::CORRUPT;
-        }
-
-        if (f[3] != "ACTIVE" && f[3] != "CLOSED") {
-        error_ = where(
-          path_, lineNo,
-          "status must be ACTIVE or CLOSED");
-        return LoadStatus::CORRUPT;
-    }
-
-    a.status = f[3];
-
-        if (!format::parseNonNegative(
-                f[4], a.withdrawnTodayPaise)) {
-            error_ = where(
-                path_, lineNo,
-                "withdrawnToday must be a non-negative whole number");
-            return LoadStatus::CORRUPT;
-        }
-
-        if (f[5] != "-" && !format::isDate(f[5])) {
-            error_ = where(
-                path_, lineNo,
-                "lastWithdrawDate must be YYYY-MM-DD or -");
-            return LoadStatus::CORRUPT;
-        }
-
-        a.lastWithdrawDate = f[5];
 
         for (const auto& existing : parsed) {
             if (existing.accountNo == a.accountNo) {
-                error_ = where(
-                    path_, lineNo,
-                    "duplicate account number " + a.accountNo);
-                return LoadStatus::CORRUPT;
+                error_ = where(path_, lineNo, "duplicate account number " + a.accountNo);
+                std::string quarantine;
+                quarantineFile(path_, quarantine);
+                status_ = LoadStatus(LoadErrorCode::MALFORMED, error_, lineNo, path_, quarantine);
+                return status_;
             }
         }
 
@@ -111,23 +114,20 @@ LoadStatus AccountRepository::load() {
     }
 
     records_ = std::move(parsed);
-    return LoadStatus::OK;
+    status_ = LoadStatus::OK;
+    return status_;
 }
 
 bool AccountRepository::save() const {
-    std::string out;
+    std::string out = format::makeVersionHeader(format::kAccountVersion) + "\n";
 
     for (const auto& a : records_) {
-        out += format::join({
-            a.accountNo,
-            a.customerId,
-            std::to_string(a.balancePaise),
-            a.status,
-            std::to_string(a.withdrawnTodayPaise),
-            a.lastWithdrawDate.empty() ? "-" : a.lastWithdrawDate
-        });
-
-        out += '\n';
+        std::string line;
+        std::string err;
+        if (!format::serializeAccount(a, line, err)) {
+            return false;
+        }
+        out += line + "\n";
     }
 
     return atomicWrite(path_, out);

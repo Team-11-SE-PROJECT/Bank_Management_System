@@ -16,9 +16,14 @@ public:
 
     LoadStatus load();
     bool append(const domain::Transaction& txn);
+    bool saveAll() const;
 
     const std::string& lastError() const {
         return error_;
+    }
+
+    const LoadStatus& lastStatus() const {
+        return status_;
     }
 
     const std::vector<domain::Transaction>& all() const {
@@ -37,6 +42,7 @@ private:
     std::string path_;
     std::vector<domain::Transaction> records_;
     std::string error_;
+    LoadStatus status_;
 };
 
 } // namespace bms::infra
