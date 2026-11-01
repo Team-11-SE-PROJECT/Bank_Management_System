@@ -710,9 +710,9 @@ int main() {
 
     transactionService.setJournal(&journal);
 
-    bms::service::AccountService accountService(customerData, credentials);
-    bms::service::AccountUnlockService unlockService(credentials);
-    bms::service::AuthService authService(credentials);
+    bms::service::AccountService accountService(customerData, credentials, &audit);
+    bms::service::AccountUnlockService unlockService(credentials, &audit);
+    bms::service::AuthService authService(credentials, &audit);
 
     bms::service::SystemStatusService systemStatusService(
         credentials,
@@ -723,7 +723,7 @@ int main() {
     );
 
     bms::service::CustomerSearchService searchService(customerData);
-    bms::service::AccountClosureService closureService(accounts);
+    bms::service::AccountClosureService closureService(accounts, &audit);
     bms::service::SessionManager session;
 
     while (true) {
