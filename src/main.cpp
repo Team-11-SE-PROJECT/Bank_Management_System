@@ -348,34 +348,6 @@ void customerMenu(
             continue;
         }
 
-        if (choice == "7") {
-            bms::service::AuditLogFilter filter;
-            if (!prompt("Date (YYYY-MM-DD, blank for all): ", filter.date) ||
-                !prompt("Event (blank for all): ", filter.event) ||
-                !prompt("Account/user (blank for all): ", filter.account) ||
-                !prompt("Result (blank for all): ", filter.result)) {
-                session.logout();
-                return;
-            }
-
-            std::vector<bms::service::AuditLogRecord> records;
-            const auto status = auditReviewService.review(session, filter, records);
-            if (status != bms::domain::Status::OK) {
-                showDomainStatus(status);
-                continue;
-            }
-
-            std::cout << "\nAudit records: " << records.size() << '\n';
-            for (const auto& record : records) {
-                std::cout << record.timestamp << " | "
-                          << record.event << " | "
-                          << record.account << " | "
-                          << record.result << " | "
-                          << record.details << '\n';
-            }
-            continue;
-        }
-
         if (choice == "5") {
             if (!changePin(userId, authService)) return;
             continue;
@@ -585,6 +557,34 @@ void adminMenu(
                 showDomainStatus(status);
             }
 
+            continue;
+        }
+
+        if (choice == "7") {
+            bms::service::AuditLogFilter filter;
+            if (!prompt("Date (YYYY-MM-DD, blank for all): ", filter.date) ||
+                !prompt("Event (blank for all): ", filter.event) ||
+                !prompt("Account/user (blank for all): ", filter.account) ||
+                !prompt("Result (blank for all): ", filter.result)) {
+                session.logout();
+                return;
+            }
+
+            std::vector<bms::service::AuditLogRecord> records;
+            const auto status = auditReviewService.review(session, filter, records);
+            if (status != bms::domain::Status::OK) {
+                showDomainStatus(status);
+                continue;
+            }
+
+            std::cout << "\nAudit records: " << records.size() << '\n';
+            for (const auto& record : records) {
+                std::cout << record.timestamp << " | "
+                          << record.event << " | "
+                          << record.account << " | "
+                          << record.result << " | "
+                          << record.details << '\n';
+            }
             continue;
         }
 
