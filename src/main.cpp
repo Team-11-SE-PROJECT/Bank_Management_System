@@ -656,6 +656,7 @@ int main() {
         bms::infra::LoadStatus::CORRUPT) {
         std::cerr << "Invalid config.ini: "
                   << config.lastError() << '\n';
+        audit.logError("CONFIG_LOAD", "CRITICAL", config.lastError());
         return 1;
     }
 
@@ -663,6 +664,7 @@ int main() {
 
     if (!credentials.load()) {
         std::cerr << "Could not load credential data.\n";
+        audit.logError("CREDENTIAL_STORE_LOAD", "CRITICAL", "Unable to read data/credentials.dat");
         return 1;
     }
 
@@ -673,6 +675,7 @@ int main() {
 
     if (!loadOrReport(accounts, "data/accounts.dat") ||
         !loadOrReport(transactions, "data/transactions.dat")) {
+        audit.logError("ACCOUNT_TRANSACTION_LOAD", "CRITICAL", "Unable to load account or transaction records");
         return 1;
     }
 
@@ -684,6 +687,7 @@ int main() {
     if (custStatus == bms::infra::LoadStatus::CORRUPT) {
         std::cerr << "Error loading customer data: "
                   << customerData.lastStatus().errorMessage << "\n";
+        audit.logError("CUSTOMER_DATA_LOAD", "CRITICAL", customerData.lastStatus().errorMessage);
         return 1;
     }
 
@@ -691,6 +695,7 @@ int main() {
     const auto journalStatus = journal.load();
     if (journalStatus == bms::infra::LoadStatus::CORRUPT) {
         std::cerr << "Error loading journal: " << journal.lastError() << "\n";
+        audit.logError("JOURNAL_LOAD", "CRITICAL", journal.lastError());
         return 1;
     }
 
