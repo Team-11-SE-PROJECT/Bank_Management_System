@@ -1,6 +1,7 @@
 #pragma once
 
 #include "infra/CredentialStore.h"
+#include "infra/AuditLogger.h"
 
 namespace bms::infra {
 
@@ -20,7 +21,8 @@ class LoginService {
 public:
     static constexpr int kMaxFailedAttempts = 3;
 
-    explicit LoginService(CredentialStore& store) : store_(store) {}
+    explicit LoginService(CredentialStore& store, const AuditLogger* auditLogger = nullptr)
+        : store_(store), auditLogger_(auditLogger) {}
 
     LoginResult authenticate(const std::string& userId,
                              const std::string& password,
@@ -28,6 +30,7 @@ public:
 
 private:
     CredentialStore& store_;
+    const AuditLogger* auditLogger_ = nullptr;
 };
 
 } // namespace bms::infra
