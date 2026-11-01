@@ -25,6 +25,7 @@
 #include "infra/TransactionRepository.h"
 #include "service/AccountDetailsService.h"
 #include "service/AccountClosureService.h"
+#include "service/AuditLogReviewService.h"
 #include "service/AccountService.h"
 #include "service/CustomerSearchService.h"
 #include "service/AccountUnlockService.h"
@@ -408,6 +409,7 @@ void adminMenu(
     bms::service::SystemStatusService& systemStatusService,
     bms::service::CustomerSearchService& searchService,
     bms::service::AccountClosureService& closureService,
+    bms::service::AuditLogReviewService& auditReviewService,
     bms::service::AuthService& authService,
     bms::infra::CredentialStore& credentials,
     bms::infra::CustomerAccountStore& customerData,
@@ -423,6 +425,7 @@ void adminMenu(
                   << "4. Change admin PIN\n"
                   << "5. Search customer and account records\n"
                   << "6. Close customer account\n"
+                  << "7. Review audit logs\n"
                   << "0. Logout\n"
                   << "Choice: ";
 
@@ -554,6 +557,30 @@ void adminMenu(
                 showDomainStatus(status);
             }
 
+            continue;
+        }
+
+        if (choice == "7") {
+            bms::service::AuditLogFilter filter;
+            if (!prompt("Date (YYYY-MM-DD, blank for all): ", filter.date) ||
+                !prompt("Event (blank for all): ", filter.event) ||
+                !prompt("Account/user (blank for all): ", filter.account) ||
+                !prompt("Result (blank for all): ", filter.result)) {
+                session.logout();
+                return;
+            }
+            std::vector<bms::service::AuditLogRecord> records;
+            const auto status = auditReviewService.review(session, filter, records);
+            if (status != bms::domain::Status::OK) {
+                showDomainStatus(status);
+                continue;
+            }
+            std::cout << "\nAudit records: " << records.size() << '\n';
+            for (const auto& record : records) {
+                std::cout << record.timestamp << " | " << record.event << " | "
+                          << record.account << " | " << record.result << " | "
+                          << record.details << '\n';
+            }
             continue;
         }
 
@@ -728,6 +755,7 @@ int main() {
 
     bms::service::CustomerSearchService searchService(customerData);
     bms::service::AccountClosureService closureService(accounts, &audit);
+    bms::service::AuditLogReviewService auditReviewService("data/audit.log");
     bms::service::SessionManager session;
 
     while (true) {
@@ -778,6 +806,7 @@ int main() {
                     systemStatusService,
                     searchService,
                     closureService,
+                    auditReviewService,
                     authService,
                     credentials,
                     customerData,
