@@ -2,6 +2,8 @@
 #include "infra/InputValidator.h"
 #include "TestHarness.h"
 
+#include <string>
+
 using bms::infra::InputValidator;
 using bms::infra::kMaxAmountPaise;
 
@@ -30,6 +32,20 @@ static void test_output_untouched_on_failure() {
     CHECK(!InputValidator::parseAmountPaise("abc", p));
     CHECK_EQ(p, 777);
 }
+
+static void test_very_large_inputs_are_rejected_without_overflow() {
+    const std::string hugeDigits(1000, '9');
+    const std::string hugeWithFraction = hugeDigits + ".99";
+    long long parsed = 777;
+
+    CHECK(!InputValidator::parseAmountPaise(hugeDigits, parsed));
+    CHECK_EQ(parsed, 777);
+    CHECK(!InputValidator::parseAmountPaise(hugeWithFraction, parsed));
+    CHECK_EQ(parsed, 777);
+    CHECK(!InputValidator::parseAmountPaise("9223372036854775807", parsed));
+    CHECK_EQ(parsed, 777);
+}
+
 static void test_format_paise() {
     CHECK_EQ(InputValidator::formatPaise(150050), "1500.50");
     CHECK_EQ(InputValidator::formatPaise(5), "0.05");
@@ -42,6 +58,7 @@ int main() {
     test_boundaries();
     test_negative_and_non_numeric();
     test_output_untouched_on_failure();
+    test_very_large_inputs_are_rejected_without_overflow();
     test_format_paise();
     return bms::test::summary("test_input_validator");
 }

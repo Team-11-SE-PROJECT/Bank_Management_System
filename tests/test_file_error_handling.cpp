@@ -3,6 +3,7 @@
 #include <string>
 
 #include "infra/AccountRepository.h"
+#include "infra/Config.h"
 #include "infra/CustomerAccountStore.h"
 #include "infra/Journal.h"
 #include "infra/TransactionRepository.h"
@@ -128,12 +129,38 @@ static void test_malformed_journal_quarantine_and_reset() {
     CHECK_EQ(journal.entries().size(), 0U);
 }
 
+static void test_invalid_config_values_report_errors_without_applying_partial_values() {
+    cleanup();
+    const std::string configPath = kTestDir + "/config.ini";
+    Config config;
+
+    writeFile(
+        configPath,
+        "daily_withdrawal_limit_paise=100000\n"
+        "daily_withdrawal_limit_paise=-1\n"
+    );
+    const auto negativeStatus = config.load(configPath);
+    CHECK_EQ(negativeStatus, LoadStatus::CORRUPT);
+    CHECK(!config.lastError().empty());
+    CHECK_EQ(config.dailyWithdrawalLimitPaise(), 2500000LL);
+
+    writeFile(
+        configPath,
+        "daily_withdrawal_limit_paise=9223372036854775808\n"
+    );
+    const auto overflowStatus = config.load(configPath);
+    CHECK_EQ(overflowStatus, LoadStatus::CORRUPT);
+    CHECK(!config.lastError().empty());
+    CHECK_EQ(config.dailyWithdrawalLimitPaise(), 2500000LL);
+}
+
 int main() {
     test_malformed_accounts_quarantine();
     test_malformed_customers_quarantine();
     test_malformed_transactions_quarantine();
     test_unsupported_version_rejection();
     test_malformed_journal_quarantine_and_reset();
+    test_invalid_config_values_report_errors_without_applying_partial_values();
 
     cleanup();
     return bms::test::summary("test_file_error_handling");
