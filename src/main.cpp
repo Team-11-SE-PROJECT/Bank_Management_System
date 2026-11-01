@@ -2,6 +2,7 @@
 #include <iostream>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #ifdef _WIN32
 #include <conio.h>
@@ -24,6 +25,7 @@
 #include "infra/TransactionRepository.h"
 #include "service/AccountDetailsService.h"
 #include "service/AccountService.h"
+#include "service/CustomerSearchService.h"
 #include "service/AccountUnlockService.h"
 #include "service/AuthService.h"
 #include "service/SessionManager.h"
@@ -405,6 +407,7 @@ void adminMenu(
     bms::service::AccountService& accountService,
     bms::service::AccountUnlockService& unlockService,
     bms::service::SystemStatusService& systemStatusService,
+    bms::service::CustomerSearchService& searchService,
     bms::service::AuthService& authService,
     bms::infra::CredentialStore& credentials,
     bms::infra::CustomerAccountStore& customerData,
@@ -418,6 +421,7 @@ void adminMenu(
                   << "2. Unlock customer login\n"
                   << "3. View system status\n"
                   << "4. Change admin PIN\n"
+                  << "5. Search customer and account records\n"
                   << "0. Logout\n"
                   << "Choice: ";
 
@@ -513,6 +517,73 @@ void adminMenu(
             continue;
         }
 
+        if (choice == "5") {
+            std::cout << "\n--- Search Customer and Account Records ---\n"
+                      << "1. Customer ID\n"
+                      << "2. Customer name\n"
+                      << "3. Phone number\n"
+                      << "4. Account number\n"
+                      << "Search type: ";
+
+            std::string searchChoice;
+            if (!std::getline(std::cin, searchChoice)) {
+                session.logout();
+                return;
+            }
+
+            bms::service::CustomerSearchField field;
+
+            if (searchChoice == "1") {
+                field = bms::service::CustomerSearchField::CUSTOMER_ID;
+            } else if (searchChoice == "2") {
+                field = bms::service::CustomerSearchField::CUSTOMER_NAME;
+            } else if (searchChoice == "3") {
+                field = bms::service::CustomerSearchField::PHONE;
+            } else if (searchChoice == "4") {
+                field = bms::service::CustomerSearchField::ACCOUNT_NUMBER;
+            } else {
+                std::cout << "Invalid search type.\n";
+                continue;
+            }
+
+            std::string query;
+            if (!prompt("Enter search value: ", query)) {
+                session.logout();
+                return;
+            }
+
+            std::vector<bms::service::CustomerSearchRecord> results;
+            const auto status =
+                searchService.search(session, field, query, results);
+
+            if (status != bms::domain::Status::OK) {
+                showDomainStatus(status);
+                continue;
+            }
+
+            std::cout << "\nSearch results: " << results.size()
+                      << " customer record(s)\n";
+
+            for (const auto& record : results) {
+                std::cout << "\nCustomer ID: "
+                          << record.customer.customerId
+                          << "\nName: " << record.customer.name
+                          << "\nPhone: " << record.customer.phone
+                          << "\nAddress: " << record.customer.address
+                          << "\nLinked accounts: "
+                          << record.accounts.size() << '\n';
+
+                for (const auto& account : record.accounts) {
+                    std::cout << "  Account number: " << account.accountNo
+                              << "\n  Balance: "
+                              << rupees(account.balancePaise)
+                              << "\n  Status: " << account.status
+                              << '\n';
+                }
+            }
+
+            continue;
+        }
         if (choice == "4") {
             if (!changePin(userId, authService)) {
                 session.logout();
@@ -601,6 +672,7 @@ int main() {
         "data/customers.dat",
         "data/accounts.dat"
     );
+    bms::service::CustomerSearchService searchService(customerData);
     bms::service::SessionManager session;
 
     while (true) {
@@ -647,6 +719,7 @@ int main() {
                     accountService,
                     unlockService,
                     systemStatusService,
+                    searchService,
                     authService,
                     credentials,
                     customerData,
