@@ -159,6 +159,28 @@ void test_authenticated_sessions_enforce_role_access() {
     );
 }
 
+void test_login_attempts_are_audited_without_credentials() {
+    bms::test::TempDir dir;
+    const std::string credentialPath = dir.file("credentials.dat");
+    const std::string auditPath = dir.file("audit.log");
+    CredentialStore store(credentialPath);
+    store.upsert(makeCredential("audited-user", Role::CUSTOMER, "secret-pin"));
+    CHECK(store.save());
+
+    AuditLogger audit(auditPath);
+    LoginService service(store, &audit);
+    CHECK(service.authenticate("audited-user", "wrong-pin", Role::CUSTOMER).status
+          == LoginStatus::INVALID_CREDENTIALS);
+    CHECK(service.authenticate("audited-user", "secret-pin", Role::CUSTOMER).status
+          == LoginStatus::SUCCESS);
+
+    const std::string log = bms::test::readFile(auditPath);
+    CHECK(log.find("|LOGIN|audited-user|INVALID_CREDENTIALS|") != std::string::npos);
+    CHECK(log.find("|LOGIN|audited-user|SUCCESS|") != std::string::npos);
+    CHECK(log.find("wrong-pin") == std::string::npos);
+    CHECK(log.find("secret-pin") == std::string::npos);
+}
+
 } // namespace
 
 int main() {
@@ -167,5 +189,6 @@ int main() {
     test_success_resets_failed_attempts();
     test_unknown_user_does_not_disclose_attempts();
     test_authenticated_sessions_enforce_role_access();
+    test_login_attempts_are_audited_without_credentials();
     return bms::test::summary("test_login_service");
 }

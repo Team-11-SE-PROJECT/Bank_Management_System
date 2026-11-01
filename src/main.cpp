@@ -649,6 +649,7 @@ int main() {
         return 1;
     }
 
+    bms::infra::AuditLogger audit("data/audit.log");
     bms::infra::Config config;
 
     if (config.load("config.ini") ==
@@ -665,7 +666,7 @@ int main() {
         return 1;
     }
 
-    bms::infra::LoginService loginService(credentials);
+    bms::infra::LoginService loginService(credentials, &audit);
 
     bms::infra::AccountRepository accounts("data/accounts.dat");
     bms::infra::TransactionRepository transactions("data/transactions.dat");
@@ -685,8 +686,6 @@ int main() {
                   << customerData.lastStatus().errorMessage << "\n";
         return 1;
     }
-
-    bms::infra::AuditLogger audit("data/audit.log");
 
     bms::infra::Journal journal("data/journal.dat");
     const auto journalStatus = journal.load();
