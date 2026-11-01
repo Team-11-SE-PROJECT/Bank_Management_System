@@ -24,8 +24,8 @@
 #include "infra/LoginService.h"
 #include "infra/TransactionRepository.h"
 #include "service/AccountDetailsService.h"
-#include "service/AuditLogReviewService.h"
 #include "service/AccountClosureService.h"
+#include "service/AuditLogReviewService.h"
 #include "service/AccountService.h"
 #include "service/CustomerSearchService.h"
 #include "service/AccountUnlockService.h"
@@ -680,12 +680,14 @@ int main() {
         return 1;
     }
 
+    bms::infra::AuditLogger audit("data/audit.log");
     bms::infra::Config config;
 
     if (config.load("config.ini") ==
         bms::infra::LoadStatus::CORRUPT) {
         std::cerr << "Invalid config.ini: "
                   << config.lastError() << '\n';
+        audit.logError("CONFIG_LOAD", "CRITICAL", config.lastError());
         return 1;
     }
 
@@ -693,16 +695,18 @@ int main() {
 
     if (!credentials.load()) {
         std::cerr << "Could not load credential data.\n";
+        audit.logError("CREDENTIAL_STORE_LOAD", "CRITICAL", "Unable to read data/credentials.dat");
         return 1;
     }
 
-    bms::infra::LoginService loginService(credentials);
+    bms::infra::LoginService loginService(credentials, &audit);
 
     bms::infra::AccountRepository accounts("data/accounts.dat");
     bms::infra::TransactionRepository transactions("data/transactions.dat");
 
     if (!loadOrReport(accounts, "data/accounts.dat") ||
         !loadOrReport(transactions, "data/transactions.dat")) {
+        audit.logError("ACCOUNT_TRANSACTION_LOAD", "CRITICAL", "Unable to load account or transaction records");
         return 1;
     }
 
@@ -714,15 +718,15 @@ int main() {
     if (custStatus == bms::infra::LoadStatus::CORRUPT) {
         std::cerr << "Error loading customer data: "
                   << customerData.lastStatus().errorMessage << "\n";
+        audit.logError("CUSTOMER_DATA_LOAD", "CRITICAL", customerData.lastStatus().errorMessage);
         return 1;
     }
-
-    bms::infra::AuditLogger audit("data/audit.log");
 
     bms::infra::Journal journal("data/journal.dat");
     const auto journalStatus = journal.load();
     if (journalStatus == bms::infra::LoadStatus::CORRUPT) {
         std::cerr << "Error loading journal: " << journal.lastError() << "\n";
+        audit.logError("JOURNAL_LOAD", "CRITICAL", journal.lastError());
         return 1;
     }
 
@@ -741,9 +745,9 @@ int main() {
 
     transactionService.setJournal(&journal);
 
-    bms::service::AccountService accountService(customerData, credentials);
-    bms::service::AccountUnlockService unlockService(credentials);
-    bms::service::AuthService authService(credentials);
+    bms::service::AccountService accountService(customerData, credentials, &audit);
+    bms::service::AccountUnlockService unlockService(credentials, &audit);
+    bms::service::AuthService authService(credentials, &audit);
 
     bms::service::SystemStatusService systemStatusService(
         credentials,
@@ -754,8 +758,7 @@ int main() {
     );
 
     bms::service::CustomerSearchService searchService(customerData);
-    bms::service::AccountClosureService closureService(accounts);
-    bms::service::AuditLogReviewService auditReviewService("data/audit.log");
+    bms::service::AccountClosureService closureService(accounts, &audit);
     bms::service::SessionManager session;
 
     while (true) {
