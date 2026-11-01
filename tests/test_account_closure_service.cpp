@@ -1,6 +1,7 @@
 #include "service/AccountClosureService.h"
 #include "TestHarness.h"
 #include "TestUtil.h"
+#include "infra/AuditLogger.h"
 
 #include <filesystem>
 #include <string>
@@ -15,8 +16,9 @@ namespace {
 struct Fixture {
     TempDir dir;
     AccountRepository accounts{dir.file("accounts.dat")};
+    AuditLogger audit{dir.file("audit.log")};
     SessionManager admin;
-    AccountClosureService service{accounts};
+    AccountClosureService service{accounts, &audit};
 
     explicit Fixture(long long balance = 0) {
         Account account;
@@ -38,6 +40,9 @@ void test_admin_closes_zero_balance_account() {
         f.service.closeAccount(f.admin, "BMS1001")
         == Status::OK
     );
+
+    const std::string auditText = bms::test::readFile(f.dir.file("audit.log"));
+    CHECK(auditText.find("|ACCOUNT_CLOSED|admin|SUCCESS|accountNo=BMS1001") != std::string::npos);
 
     const auto* account = f.accounts.find("BMS1001");
     CHECK(account != nullptr);
