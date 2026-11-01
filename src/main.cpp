@@ -365,13 +365,13 @@ void customerMenu(
                 continue;
             }
 
-            std::cout << "\\nAudit records: " << records.size() << '\\n';
+            std::cout << "\nAudit records: " << records.size() << '\n';
             for (const auto& record : records) {
                 std::cout << record.timestamp << " | "
                           << record.event << " | "
                           << record.account << " | "
                           << record.result << " | "
-                          << record.details << '\\n';
+                          << record.details << '\n';
             }
             continue;
         }
