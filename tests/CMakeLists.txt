@@ -104,3 +104,8 @@ add_test(NAME test_journal_recovery COMMAND test_journal_recovery)
 add_executable(test_customer_search_service test_customer_search_service.cpp)
 target_link_libraries(test_customer_search_service PRIVATE bms_core)
 add_test(NAME test_customer_search_service COMMAND test_customer_search_service)
+
+add_executable(test_account_closure_service test_account_closure_service.cpp)
+target_link_libraries(test_account_closure_service PRIVATE bms_core)
+target_include_directories(test_account_closure_service PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_account_closure_service COMMAND test_account_closure_service)
