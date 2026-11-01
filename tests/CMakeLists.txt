@@ -109,3 +109,8 @@ add_executable(test_account_closure_service test_account_closure_service.cpp)
 target_link_libraries(test_account_closure_service PRIVATE bms_core)
 target_include_directories(test_account_closure_service PRIVATE "${CMAKE_SOURCE_DIR}/tests")
 add_test(NAME test_account_closure_service COMMAND test_account_closure_service)
+
+add_executable(test_audit_logger test_audit_logger.cpp)
+target_link_libraries(test_audit_logger PRIVATE bms_core)
+target_include_directories(test_audit_logger PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_audit_logger COMMAND test_audit_logger)
