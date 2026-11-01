@@ -32,9 +32,18 @@ add_executable(test_customer_account_store test_customer_account_store.cpp)
 target_link_libraries(test_customer_account_store PRIVATE bms_core)
 add_test(NAME test_customer_account_store COMMAND test_customer_account_store)
 
+add_executable(test_customer_update test_customer_update.cpp)
+target_link_libraries(test_customer_update PRIVATE bms_core)
+add_test(NAME test_customer_update COMMAND test_customer_update)
+
+add_executable(test_customer_update_service test_customer_update_service.cpp)
+target_link_libraries(test_customer_update_service PRIVATE bms_core)
+add_test(NAME test_customer_update_service COMMAND test_customer_update_service)
+
 add_executable(test_account_service test_account_service.cpp)
 target_link_libraries(test_account_service PRIVATE bms_core)
 add_test(NAME test_account_service COMMAND test_account_service)
+
 add_executable(test_account_unlock_service test_account_unlock_service.cpp)
 target_link_libraries(test_account_unlock_service PRIVATE bms_core)
 target_include_directories(test_account_unlock_service PRIVATE "${CMAKE_SOURCE_DIR}/tests")
