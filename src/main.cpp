@@ -649,7 +649,6 @@ int main() {
         return 1;
     }
 
-    bms::infra::AuditLogger audit("data/audit.log");
     bms::infra::Config config;
 
     if (config.load("config.ini") ==
@@ -660,6 +659,7 @@ int main() {
         return 1;
     }
 
+    bms::infra::AuditLogger audit("data/audit.log");
     bms::infra::CredentialStore credentials("data/credentials.dat");
 
     if (!credentials.load()) {
