@@ -5,6 +5,7 @@
 
 #include "domain/Status.h"
 #include "infra/CredentialStore.h"
+#include "infra/AuditLogger.h"
 #include "infra/CustomerAccountStore.h"
 
 namespace bms::service {
@@ -20,7 +21,8 @@ class AccountService {
 public:
     AccountService(
         infra::CustomerAccountStore& customerAccountStore,
-        infra::CredentialStore& credentialStore
+        infra::CredentialStore& credentialStore,
+        const infra::AuditLogger* auditLogger = nullptr
     );
 
     domain::Status createAccount(
@@ -31,6 +33,7 @@ public:
 private:
     infra::CustomerAccountStore& customerAccountStore_;
     infra::CredentialStore& credentialStore_;
+    const infra::AuditLogger* auditLogger_ = nullptr;
 };
 
 } // namespace bms::service

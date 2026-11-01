@@ -4,8 +4,10 @@
 
 namespace bms::service {
 
-AccountUnlockService::AccountUnlockService(infra::CredentialStore& store)
-    : store_(store) {}
+AccountUnlockService::AccountUnlockService(
+    infra::CredentialStore& store,
+    const infra::AuditLogger* auditLogger
+) : store_(store), auditLogger_(auditLogger) {}
 
 domain::Status AccountUnlockService::unlockAccount(
     const SessionManager& session,
@@ -40,6 +42,7 @@ domain::Status AccountUnlockService::unlockAccount(
         return domain::Status::STORAGE_FAILURE;
     }
 
+    if (auditLogger_) auditLogger_->log("ACCOUNT_UNLOCKED", session.getUserId(), "SUCCESS", "targetUserId=" + targetUserId);
     return domain::Status::OK;
 }
 
