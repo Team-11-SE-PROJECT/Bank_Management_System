@@ -2,7 +2,10 @@
 #include "infra/FileUtil.h"
 #include "infra/LoginService.h"
 #include "infra/PasswordHasher.h"
+#include "service/RbacGuard.h"
+#include "service/SessionManager.h"
 #include "TestHarness.h"
+#include "TestUtil.h"
 
 #include <filesystem>
 #include <string>
@@ -96,6 +99,66 @@ void test_unknown_user_does_not_disclose_attempts() {
     std::filesystem::remove(path);
 }
 
+void test_authenticated_sessions_enforce_role_access() {
+    bms::test::TempDir dir;
+    CredentialStore store(dir.file("credentials.dat"));
+    store.upsert(makeCredential("customer", Role::CUSTOMER, "1234"));
+    store.upsert(makeCredential("admin", Role::ADMIN, "admin123"));
+    CHECK(store.save());
+
+    CredentialStore reloaded(dir.file("credentials.dat"));
+    CHECK(reloaded.load());
+    LoginService login(reloaded);
+    bms::service::SessionManager session;
+
+    CHECK(
+        bms::service::RbacGuard::checkRole(session, Role::CUSTOMER)
+        == bms::domain::Status::UNAUTHORIZED
+    );
+
+    const auto rejected =
+        login.authenticate("customer", "wrong", Role::CUSTOMER);
+    CHECK(rejected.status == LoginStatus::INVALID_CREDENTIALS);
+    CHECK(!session.isActive());
+
+    const auto customerLogin =
+        login.authenticate("customer", "1234", Role::CUSTOMER);
+    CHECK(customerLogin.status == LoginStatus::SUCCESS);
+    if (customerLogin.status == LoginStatus::SUCCESS) {
+        session.login("customer", Role::CUSTOMER, 300);
+    }
+    CHECK(
+        bms::service::RbacGuard::checkRole(session, Role::CUSTOMER)
+        == bms::domain::Status::OK
+    );
+    CHECK(
+        bms::service::RbacGuard::checkRole(session, Role::ADMIN)
+        == bms::domain::Status::UNAUTHORIZED
+    );
+
+    session.logout();
+    const auto adminLogin =
+        login.authenticate("admin", "admin123", Role::ADMIN);
+    CHECK(adminLogin.status == LoginStatus::SUCCESS);
+    if (adminLogin.status == LoginStatus::SUCCESS) {
+        session.login("admin", Role::ADMIN, 300);
+    }
+    CHECK(
+        bms::service::RbacGuard::checkRole(session, Role::ADMIN)
+        == bms::domain::Status::OK
+    );
+    CHECK(
+        bms::service::RbacGuard::checkRole(session, Role::CUSTOMER)
+        == bms::domain::Status::UNAUTHORIZED
+    );
+
+    session.logout();
+    CHECK(
+        bms::service::RbacGuard::checkRole(session, Role::ADMIN)
+        == bms::domain::Status::UNAUTHORIZED
+    );
+}
+
 } // namespace
 
 int main() {
@@ -103,5 +166,6 @@ int main() {
     test_invalid_attempts_lock_and_reject_login();
     test_success_resets_failed_attempts();
     test_unknown_user_does_not_disclose_attempts();
+    test_authenticated_sessions_enforce_role_access();
     return bms::test::summary("test_login_service");
 }
