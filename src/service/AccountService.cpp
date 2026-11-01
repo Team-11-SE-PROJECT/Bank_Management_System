@@ -99,10 +99,12 @@ unsigned long long nextAccountSequence(
 
 AccountService::AccountService(
     infra::CustomerAccountStore& customerAccountStore,
-    infra::CredentialStore& credentialStore
+    infra::CredentialStore& credentialStore,
+    const infra::AuditLogger* auditLogger
 )
     : customerAccountStore_(customerAccountStore),
-      credentialStore_(credentialStore) {}
+      credentialStore_(credentialStore),
+      auditLogger_(auditLogger) {}
 
 domain::Status AccountService::createAccount(
     const CustomerInfo& customerInfo,
@@ -184,6 +186,7 @@ domain::Status AccountService::createAccount(
     }
 
     outAccountNo = accountNo;
+    if (auditLogger_) auditLogger_->log("CUSTOMER_ACCOUNT_CREATED", customerId, "SUCCESS", "accountNo=" + accountNo);
     return domain::Status::OK;
 }
 
