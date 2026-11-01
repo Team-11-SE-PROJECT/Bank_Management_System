@@ -7,6 +7,8 @@
 #include "infra/CredentialStore.h"
 #include "infra/CustomerAccountStore.h"
 #include "infra/PasswordHasher.h"
+#include "infra/AuditLogger.h"
+#include "TestUtil.h"
 #include "service/AccountService.h"
 
 int main() {
@@ -23,7 +25,8 @@ int main() {
         testDir + "/credentials.dat"
     );
 
-    bms::service::AccountService service(dataStore, credentialStore);
+    bms::infra::AuditLogger audit(testDir + "/audit.log");
+    bms::service::AccountService service(dataStore, credentialStore, &audit);
 
     bms::service::CustomerInfo info{
         "Test Customer",
@@ -45,6 +48,13 @@ int main() {
         dataStore.customers().size() != 1 ||
         dataStore.accounts().size() != 1) {
         std::cerr << "FAIL: customer or account was not saved\n";
+        std::filesystem::remove_all(testDir);
+        return 1;
+    }
+
+    const std::string auditContents = bms::test::readFile(testDir + "/audit.log");
+    if (auditContents.find("|CUSTOMER_ACCOUNT_CREATED|CUST0001|SUCCESS|") == std::string::npos) {
+        std::cerr << "FAIL: account creation was not audited\\n";
         std::filesystem::remove_all(testDir);
         return 1;
     }
