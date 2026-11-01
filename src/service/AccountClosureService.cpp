@@ -5,9 +5,10 @@
 namespace bms::service {
 
 AccountClosureService::AccountClosureService(
-    infra::AccountRepository& accounts
+    infra::AccountRepository& accounts,
+    const infra::AuditLogger* auditLogger
 )
-    : accounts_(accounts) {
+    : accounts_(accounts), auditLogger_(auditLogger) {
 }
 
 domain::Status AccountClosureService::closeAccount(
@@ -51,6 +52,7 @@ domain::Status AccountClosureService::closeAccount(
         return domain::Status::STORAGE_FAILURE;
     }
 
+    if (auditLogger_) auditLogger_->log("ACCOUNT_CLOSED", session.getUserId(), "SUCCESS", "accountNo=" + accountNo);
     return domain::Status::OK;
 }
 
