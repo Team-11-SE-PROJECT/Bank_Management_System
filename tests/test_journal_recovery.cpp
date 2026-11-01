@@ -103,18 +103,17 @@ static void test_applied_crash_recovery_deposit() {
     std::string jrnPath = kTestDir + "/journal.dat";
     std::string auditPath = kTestDir + "/audit.log";
 
-    AccountRepository accRepo(accPath);
-    TransactionRepository txnRepo(txnPath);
-    AuditLogger audit(auditPath);
-
     // Initial account on disk has balance 100,000 paise (Rs. 1000.00)
-    Account acc;
-    acc.accountNo = "1000000001";
-    acc.customerId = "CUST1001";
-    acc.balancePaise = 100000;
-    acc.status = "ACTIVE";
-    accRepo.upsert(acc);
-    accRepo.save();
+    {
+        AccountRepository initialAccounts(accPath);
+        Account acc;
+        acc.accountNo = "1000000001";
+        acc.customerId = "CUST1001";
+        acc.balancePaise = 100000;
+        acc.status = "ACTIVE";
+        initialAccounts.upsert(acc);
+        CHECK(initialAccounts.save());
+    }
 
     // Crash simulation: a deposit of 50,000 paise reached APPLIED stage in journal,
     // but crashed before accounts.dat was saved or transactions.dat was written.
@@ -134,7 +133,14 @@ static void test_applied_crash_recovery_deposit() {
 
     writeFile(jrnPath, "#VERSION 1\n" + line + "\n");
 
+    AccountRepository accRepo(accPath);
+    TransactionRepository txnRepo(txnPath);
     Journal journal(jrnPath);
+    AuditLogger audit(auditPath);
+
+    // Load fresh repositories to simulate startup after the crash.
+    CHECK(accRepo.load().isOk());
+    CHECK_EQ(txnRepo.load(), LoadStatus::MISSING);
     CHECK(journal.load().isOk());
     CHECK_EQ(journal.entries().size(), 1U);
 
@@ -151,10 +157,9 @@ static void test_applied_crash_recovery_deposit() {
         CHECK_EQ(updatedAcc->balancePaise, 150000LL);
     }
 
-    // Transaction should now be recorded in transactions repo
-    TransactionRepository reloadedTxn(txnPath);
-    CHECK(reloadedTxn.load().isOk());
-    const auto& txns = reloadedTxn.all();
+    // Transaction should now be recorded in the reloaded repository.
+    CHECK_EQ(txnRepo.all().size(), 1U);
+    const auto& txns = txnRepo.all();
     CHECK_EQ(txns.size(), 1U);
     if (txns.size() == 1U) {
         CHECK_EQ(txns[0].txnId, "TXN00000002");
@@ -168,6 +173,23 @@ static void test_applied_crash_recovery_deposit() {
     CHECK(reloadedJournal.load().isOk());
     CHECK_EQ(reloadedJournal.entries().size(), 2U);
     CHECK(reloadedJournal.entries().back().state == JournalState::COMMITTED);
+
+    // Recovery from a second fresh startup must not apply the deposit twice.
+    AccountRepository restartedAccounts(accPath);
+    TransactionRepository restartedTransactions(txnPath);
+    Journal restartedJournal(jrnPath);
+    CHECK(restartedAccounts.load().isOk());
+    CHECK(restartedTransactions.load().isOk());
+    CHECK_EQ(Journal::recover(
+        restartedJournal, restartedAccounts, restartedTransactions, &audit
+    ), 0);
+    const auto* balanceAfterRestart =
+        restartedAccounts.find("1000000001");
+    CHECK(balanceAfterRestart != nullptr);
+    if (balanceAfterRestart != nullptr) {
+        CHECK_EQ(balanceAfterRestart->balancePaise, 150000LL);
+    }
+    CHECK_EQ(restartedTransactions.all().size(), 1U);
 }
 
 static void test_idempotent_recovery() {
