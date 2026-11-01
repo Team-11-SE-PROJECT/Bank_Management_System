@@ -474,6 +474,111 @@ static void test_audit_log_records_success_and_failure() {
     );
 }
 
+static void test_banking_operations_survive_repository_reload() {
+    TempDir dir;
+    const std::string accountPath = dir.file("accounts.dat");
+    const std::string transactionPath = dir.file("transactions.dat");
+    const std::string auditPath = dir.file("audit.log");
+    const std::string accountNo = "BMS2001";
+    const std::string timestamp = "2026-10-23 10:00:00";
+
+    Account initialAccount;
+    initialAccount.accountNo = accountNo;
+    initialAccount.customerId = "CUST2001";
+    initialAccount.balancePaise = 1000000;
+
+    AccountRepository seed(accountPath);
+    seed.upsert(initialAccount);
+    CHECK(seed.save());
+
+    Config config;
+    AuditLogger audit(auditPath);
+
+    {
+        AccountRepository accounts(accountPath);
+        TransactionRepository transactions(transactionPath);
+        CHECK(accounts.load().isOk());
+
+        TransactionService service(
+            accounts, transactions, config, audit, [&] { return timestamp; }
+        );
+
+        const auto deposit =
+            service.deposit(accountNo, 250000, DepositMode::CHEQUE);
+        CHECK(deposit.status == TxnStatus::OK);
+        CHECK_EQ(deposit.txnId, "TXN000001");
+        CHECK_EQ(deposit.newBalancePaise, 1250000);
+    }
+
+    {
+        AccountRepository accounts(accountPath);
+        TransactionRepository transactions(transactionPath);
+        CHECK(accounts.load().isOk());
+        CHECK(transactions.load().isOk());
+
+        TransactionService service(
+            accounts, transactions, config, audit, [&] { return timestamp; }
+        );
+
+        CHECK_EQ(service.getBalance(accountNo).newBalancePaise, 1250000);
+
+        const auto withdrawal = service.withdraw(accountNo, 300000);
+        CHECK(withdrawal.status == TxnStatus::OK);
+        CHECK_EQ(withdrawal.txnId, "TXN000002");
+        CHECK_EQ(withdrawal.newBalancePaise, 950000);
+
+        const auto cashDeposit =
+            service.deposit(accountNo, 5050, DepositMode::CASH);
+        CHECK(cashDeposit.status == TxnStatus::OK);
+        CHECK_EQ(cashDeposit.txnId, "TXN000003");
+        CHECK_EQ(cashDeposit.newBalancePaise, 955050);
+    }
+
+    {
+        AccountRepository accounts(accountPath);
+        TransactionRepository transactions(transactionPath);
+        CHECK(accounts.load().isOk());
+        CHECK(transactions.load().isOk());
+
+        TransactionService service(
+            accounts, transactions, config, audit, [&] { return timestamp; }
+        );
+
+        CHECK_EQ(service.getBalance(accountNo).newBalancePaise, 955050);
+        CHECK(
+            service.withdraw(accountNo, 1000000).status
+            == TxnStatus::INSUFFICIENT_FUNDS
+        );
+        CHECK_EQ(service.getBalance(accountNo).newBalancePaise, 955050);
+
+        const auto& history = transactions.all();
+        CHECK_EQ(history.size(), std::size_t(6));
+        CHECK(transactions.pending().empty());
+
+        if (history.size() == 6) {
+            CHECK(history[1].state == TxnState::COMMITTED);
+            CHECK_EQ(history[1].txnId, "TXN000001");
+            CHECK(history[1].type == TxnType::DEPOSIT);
+            CHECK_EQ(history[1].counterparty, "CHEQUE");
+            CHECK_EQ(history[1].amountPaise, 250000);
+            CHECK_EQ(history[1].balanceAfterPaise, 1250000);
+
+            CHECK(history[3].state == TxnState::COMMITTED);
+            CHECK_EQ(history[3].txnId, "TXN000002");
+            CHECK(history[3].type == TxnType::WITHDRAWAL);
+            CHECK_EQ(history[3].amountPaise, 300000);
+            CHECK_EQ(history[3].balanceAfterPaise, 950000);
+
+            CHECK(history[5].state == TxnState::COMMITTED);
+            CHECK_EQ(history[5].txnId, "TXN000003");
+            CHECK(history[5].type == TxnType::DEPOSIT);
+            CHECK_EQ(history[5].counterparty, "CASH");
+            CHECK_EQ(history[5].amountPaise, 5050);
+            CHECK_EQ(history[5].balanceAfterPaise, 955050);
+        }
+    }
+}
+
 int main() {
     test_deposit_updates_balance_in_memory_and_file();
     test_deposit_unknown_and_closed_account();
@@ -500,6 +605,7 @@ int main() {
 
     test_storage_failure_rolls_back();
     test_audit_log_records_success_and_failure();
+    test_banking_operations_survive_repository_reload();
 
     return bms::test::summary("test_transaction_service");
 }
