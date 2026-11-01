@@ -30,16 +30,13 @@ bool matches(
 
 bool parseRecord(const std::string& line, AuditLogRecord& record) {
     const std::size_t first = line.find('|');
+    if (first == std::string::npos) return false;
     const std::size_t second = line.find('|', first + 1);
+    if (second == std::string::npos) return false;
     const std::size_t third = line.find('|', second + 1);
+    if (third == std::string::npos) return false;
     const std::size_t fourth = line.find('|', third + 1);
-
-    if (first == std::string::npos ||
-        second == std::string::npos ||
-        third == std::string::npos ||
-        fourth == std::string::npos) {
-        return false;
-    }
+    if (fourth == std::string::npos) return false;
 
     record.timestamp = line.substr(0, first);
     record.event = line.substr(first + 1, second - first - 1);
