@@ -4,19 +4,24 @@
 
 #include "domain/Status.h"
 #include "infra/CredentialStore.h"
+#include "infra/AuditLogger.h"
 #include "service/SessionManager.h"
 
 namespace bms::service {
 
 class AccountUnlockService {
 public:
-    explicit AccountUnlockService(infra::CredentialStore& store);
+    explicit AccountUnlockService(
+        infra::CredentialStore& store,
+        const infra::AuditLogger* auditLogger = nullptr
+    );
 
     domain::Status unlockAccount(const SessionManager& session,
                                  const std::string& targetUserId);
 
 private:
     infra::CredentialStore& store_;
+    const infra::AuditLogger* auditLogger_ = nullptr;
 };
 
 } // namespace bms::service
