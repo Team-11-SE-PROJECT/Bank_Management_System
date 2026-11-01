@@ -24,6 +24,7 @@
 #include "infra/LoginService.h"
 #include "infra/TransactionRepository.h"
 #include "service/AccountDetailsService.h"
+#include "service/AccountClosureService.h"
 #include "service/AccountService.h"
 #include "service/CustomerSearchService.h"
 #include "service/AccountUnlockService.h"
@@ -263,7 +264,6 @@ bool changePin(
     }
     return true;
 }
-
 void showAccountDetails(
     const std::string& userId,
     const std::string& accountNo,
@@ -400,7 +400,6 @@ void customerMenu(
         showResult(result);
     }
 }
-
 void adminMenu(
     const std::string& userId,
     bms::service::SessionManager& session,
@@ -408,6 +407,7 @@ void adminMenu(
     bms::service::AccountUnlockService& unlockService,
     bms::service::SystemStatusService& systemStatusService,
     bms::service::CustomerSearchService& searchService,
+    bms::service::AccountClosureService& closureService,
     bms::service::AuthService& authService,
     bms::infra::CredentialStore& credentials,
     bms::infra::CustomerAccountStore& customerData,
@@ -422,6 +422,7 @@ void adminMenu(
                   << "3. View system status\n"
                   << "4. Change admin PIN\n"
                   << "5. Search customer and account records\n"
+                  << "6. Close customer account\n"
                   << "0. Logout\n"
                   << "Choice: ";
 
@@ -444,6 +445,7 @@ void adminMenu(
                 session.logout();
                 return;
             }
+
             std::cout << "Initial customer PIN (4-6 digits): ";
             if (!readMaskedPassword(info.initialPin)) {
                 session.logout();
@@ -454,16 +456,19 @@ void adminMenu(
             const auto status =
                 accountService.createAccount(info, accountNo);
             showDomainStatus(status);
+
             if (status == bms::domain::Status::OK) {
                 if (!loadOrReport(accounts, "data/accounts.dat")) {
                     session.logout();
                     return;
                 }
+
                 const auto* account = accounts.find(accountNo);
                 if (account == nullptr) {
                     std::cerr << "Created account could not be reloaded.\n";
                     continue;
                 }
+
                 std::cout << "Customer login ID: " << account->customerId
                           << '\n'
                           << "Account number: " << accountNo << '\n'
@@ -478,6 +483,7 @@ void adminMenu(
                 session.logout();
                 return;
             }
+
             showDomainStatus(
                 unlockService.unlockAccount(session, targetUserId)
             );
@@ -493,6 +499,7 @@ void adminMenu(
             bms::service::SystemStatus status;
             const auto result =
                 systemStatusService.getStatus(session, status);
+
             if (result != bms::domain::Status::OK) {
                 showDomainStatus(result);
                 continue;
@@ -514,6 +521,39 @@ void adminMenu(
                       << '\n'
                       << "Customers: " << status.customerCount << '\n'
                       << "Accounts: " << status.accountCount << '\n';
+            continue;
+        }
+
+        if (choice == "6") {
+            std::string accountNo;
+            if (!prompt("Account number to close: ", accountNo)) {
+                session.logout();
+                return;
+            }
+
+            std::cout << "Close account " << accountNo
+                      << "? This action cannot be undone. (y/n): ";
+
+            std::string confirmation;
+            if (!std::getline(std::cin, confirmation)) {
+                session.logout();
+                return;
+            }
+
+            if (confirmation != "y" && confirmation != "Y") {
+                std::cout << "Account closure cancelled.\n";
+                continue;
+            }
+
+            const auto status =
+                closureService.closeAccount(session, accountNo);
+
+            if (status == bms::domain::Status::OK) {
+                std::cout << "Account closed successfully.\n";
+            } else {
+                showDomainStatus(status);
+            }
+
             continue;
         }
 
@@ -584,6 +624,7 @@ void adminMenu(
 
             continue;
         }
+
         if (choice == "4") {
             if (!changePin(userId, authService)) {
                 session.logout();
@@ -637,6 +678,7 @@ int main() {
     bms::infra::CustomerAccountStore customerData(
         "data/customers.dat", "data/accounts.dat"
     );
+
     const auto custStatus = customerData.loadWithStatus();
     if (custStatus == bms::infra::LoadStatus::CORRUPT) {
         std::cerr << "Error loading customer data: "
@@ -653,18 +695,25 @@ int main() {
         return 1;
     }
 
-    int recovered = bms::infra::Journal::recover(journal, accounts, transactions, &audit);
+    int recovered = bms::infra::Journal::recover(
+        journal, accounts, transactions, &audit
+    );
+
     if (recovered > 0) {
-        std::cout << "Crash recovery complete: " << recovered << " journal entries reconciled.\n";
+        std::cout << "Crash recovery complete: " << recovered
+                  << " journal entries reconciled.\n";
     }
 
     bms::service::TransactionService transactionService(
         accounts, transactions, config, audit
     );
+
     transactionService.setJournal(&journal);
+
     bms::service::AccountService accountService(customerData, credentials);
     bms::service::AccountUnlockService unlockService(credentials);
     bms::service::AuthService authService(credentials);
+
     bms::service::SystemStatusService systemStatusService(
         credentials,
         customerData,
@@ -672,7 +721,9 @@ int main() {
         "data/customers.dat",
         "data/accounts.dat"
     );
+
     bms::service::CustomerSearchService searchService(customerData);
+    bms::service::AccountClosureService closureService(accounts);
     bms::service::SessionManager session;
 
     while (true) {
@@ -680,7 +731,7 @@ int main() {
                   << "Customer features after login: balance, deposit, withdraw, "
                      "account details, change PIN\n"
                   << "Admin features after login: create account, unlock login, "
-                     "system status, change PIN\n"
+                     "system status, change PIN, close account\n"
                   << "1. Customer login\n"
                   << "2. Admin login\n"
                   << "0. Exit\n"
@@ -699,6 +750,7 @@ int main() {
                     bms::infra::Role::CUSTOMER,
                     userId)) {
                 session.login(userId, bms::infra::Role::CUSTOMER, 300);
+
                 customerMenu(
                     userId,
                     accounts,
@@ -706,6 +758,7 @@ int main() {
                     customerData,
                     authService
                 );
+
                 session.logout();
             }
         } else if (selection == "2") {
@@ -720,6 +773,7 @@ int main() {
                     unlockService,
                     systemStatusService,
                     searchService,
+                    closureService,
                     authService,
                     credentials,
                     customerData,
