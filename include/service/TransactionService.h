@@ -68,6 +68,11 @@ public:
         const std::string& destinationAccountNo
     ) const;
 
+    //Issue 33
+    TxnStatus validateTransferAmount(
+        const std::string& sourceAccountNo,
+        long long amountPaise
+    ) const;
 private:
     TxnResult finish(
         const domain::Account& updated,

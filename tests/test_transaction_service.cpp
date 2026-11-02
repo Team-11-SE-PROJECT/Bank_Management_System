@@ -675,6 +675,97 @@ static void test_transfer_validation_changes_no_data_and_audits_failures() {
     );
 }
 
+// ------------------------------------------------------------
+// Issue #33: Validate transfer amount and available funds
+// ------------------------------------------------------------
+
+static void test_transfer_amount_validation_accepts_valid_amount() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAmount("BMS1001", 50000)
+        == TxnStatus::OK
+    );
+}
+
+static void test_transfer_amount_validation_accepts_exact_balance() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAmount("BMS1001", 100000)
+        == TxnStatus::OK
+    );
+}
+
+static void test_transfer_amount_validation_rejects_zero_and_negative() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAmount("BMS1001", 0)
+        == TxnStatus::INVALID_INPUT
+    );
+    CHECK(
+        f.svc.validateTransferAmount("BMS1001", -1)
+        == TxnStatus::INVALID_INPUT
+    );
+}
+
+static void test_transfer_amount_validation_rejects_over_max() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAmount(
+            "BMS1001", kMaxAmountPaise + 1
+        ) == TxnStatus::INVALID_INPUT
+    );
+}
+
+static void test_transfer_amount_validation_rejects_insufficient_funds() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAmount("BMS1001", 100001)
+        == TxnStatus::INSUFFICIENT_FUNDS
+    );
+}
+
+static void test_transfer_amount_validation_rejects_unknown_account() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAmount("NOPE", 100)
+        == TxnStatus::NOT_FOUND
+    );
+}
+
+static void test_transfer_amount_validation_rejects_closed_account() {
+    Fixture f;
+
+    f.accounts.find("BMS1001")->status = "CLOSED";
+
+    CHECK(
+        f.svc.validateTransferAmount("BMS1001", 100)
+        == TxnStatus::ACCOUNT_CLOSED
+    );
+}
+
+static void test_transfer_amount_validation_changes_no_data_and_audits_failures() {
+    Fixture f;
+
+    f.svc.validateTransferAmount("BMS1001", 100001);
+
+    CHECK_EQ(f.balance(), 100000);
+    CHECK_EQ(f.txns.all().size(), 0u);
+
+    const std::string log =
+        bms::test::readFile(f.dir.file("audit.log"));
+
+    CHECK(
+        log.find("|TRANSFER_VALIDATION|BMS1001|FAILED_INSUFFICIENT_FUNDS|")
+        != std::string::npos
+    );
+}
+
 int main() {
     test_deposit_updates_balance_in_memory_and_file();
     test_deposit_unknown_and_closed_account();
@@ -710,5 +801,14 @@ int main() {
     test_transfer_validation_rejects_closed_accounts();
     test_transfer_validation_changes_no_data_and_audits_failures();
 
+    test_transfer_amount_validation_accepts_valid_amount();
+    test_transfer_amount_validation_accepts_exact_balance();
+    test_transfer_amount_validation_rejects_zero_and_negative();
+    test_transfer_amount_validation_rejects_over_max();
+    test_transfer_amount_validation_rejects_insufficient_funds();
+    test_transfer_amount_validation_rejects_unknown_account();
+    test_transfer_amount_validation_rejects_closed_account();
+    test_transfer_amount_validation_changes_no_data_and_audits_failures();
+    
     return bms::test::summary("test_transaction_service");
 }
