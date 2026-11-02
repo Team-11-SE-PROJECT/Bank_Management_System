@@ -11,8 +11,12 @@
 #include "infra/LoginService.h"
 #include "infra/TransactionRepository.h"
 #include "service/AccountService.h"
+#include "service/AccountClosureService.h"
 #include "service/AccountUnlockService.h"
+#include "service/AuditLogReviewService.h"
 #include "service/AuthService.h"
+#include "service/CustomerSearchService.h"
+#include "service/CustomerUpdateService.h"
 #include "service/SystemStatusService.h"
 #include "service/TransactionService.h"
 
@@ -28,7 +32,11 @@ public:
         infra::CustomerAccountStore& customerData,
         TransactionService& transactionService,
         AccountService& accountService,
+        CustomerUpdateService& customerUpdateService,
         AccountUnlockService& unlockService,
+        CustomerSearchService& customerSearchService,
+        AccountClosureService& accountClosureService,
+        AuditLogReviewService& auditLogReviewService,
         SystemStatusService& systemStatusService,
         AuthService& authService
     );

@@ -48,7 +48,7 @@ function clearMessage(container) {
   }
 }
 
-function bindForm(form, action, onSuccess) {
+function bindForm(form, action, onSuccess, beforeSubmit) {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     clearMessage(form);
@@ -56,6 +56,7 @@ function bindForm(form, action, onSuccess) {
     submit.disabled = true;
     try {
       const values = Object.fromEntries(new FormData(form).entries());
+      if (beforeSubmit && !beforeSubmit(values)) return;
       const result = await api(action, values);
       form.reset();
       if (onSuccess) await onSuccess(result);
@@ -119,13 +120,19 @@ function transactionRows(items) {
   if (!items.length) return '<div class="empty-state">No transactions match your search.</div>';
   return items.map((item) => {
     const withdrawal = item.type === "WITHDRAWAL";
-    const label = withdrawal ? "Withdrawal" : "Deposit";
+    const transfer = item.counterparty !== "-" &&
+      item.counterparty !== "CASH" &&
+      item.counterparty !== "CHEQUE" &&
+      item.counterparty !== "TRANSFER_REVERSAL";
+    const label = transfer
+      ? `${withdrawal ? "Transfer to" : "Transfer from"} ${escapeHtml(item.counterparty)}`
+      : withdrawal ? "Withdrawal" : "Deposit";
     const sign = withdrawal ? "−" : "+";
     return `<article class="transaction-row">
       <span class="transaction-icon ${withdrawal ? "withdrawal" : "deposit"}" aria-hidden="true">${withdrawal ? "↗" : "↙"}</span>
       <div>
         <div class="transaction-name">${label} <span aria-label="transaction ID">${escapeHtml(item.txnId)}</span></div>
-        <div class="transaction-meta">${escapeHtml(item.timestamp)} · ${item.counterparty === "CASH" || item.counterparty === "CHEQUE" ? `Via ${escapeHtml(item.counterparty.toLowerCase())}` : "Bank withdrawal"}</div>
+        <div class="transaction-meta">${escapeHtml(item.timestamp)} · ${item.counterparty === "CASH" || item.counterparty === "CHEQUE" ? `Via ${escapeHtml(item.counterparty.toLowerCase())}` : transfer ? "Account transfer" : "Bank transaction"}</div>
       </div>
       <div class="transaction-values">
         <div class="transaction-amount ${withdrawal ? "negative" : ""}">${sign}${money(item.amountPaise)}</div>
@@ -135,21 +142,21 @@ function transactionRows(items) {
   }).join("");
 }
 
-function bindTransactionHistory(items) {
+function bindTransactionHistory(initialItems) {
   const list = document.querySelector("#transaction-list");
   const search = document.querySelector("#history-search");
-  const typeFilter = document.querySelector("#history-type");
+  const filterForm = document.querySelector("#history-filter");
   const pageLabel = document.querySelector("#history-page");
   const previous = document.querySelector("#history-previous");
   const next = document.querySelector("#history-next");
+  const message = document.querySelector("#history-message");
+  let items = initialItems;
   let page = 0;
   const pageSize = 10;
 
   const render = () => {
     const query = search.value.trim().toLowerCase();
-    const type = typeFilter.value;
     const filtered = items.filter((item) =>
-      (type === "ALL" || item.type === type) &&
       [item.txnId, item.timestamp, item.counterparty, item.type]
         .some((value) => String(value).toLowerCase().includes(query))
     );
@@ -163,8 +170,24 @@ function bindTransactionHistory(items) {
     next.disabled = page >= pageCount - 1;
   };
 
+  filterForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    message.textContent = "";
+    message.className = "hidden";
+    const values = Object.fromEntries(new FormData(filterForm).entries());
+    try {
+      const result = await api("/api/history", values);
+      items = result.transactions;
+      page = 0;
+      render();
+      document.querySelector("#history-total").textContent =
+        `${items.length} matching`;
+    } catch (error) {
+      message.textContent = error.message;
+      message.className = "form-error";
+    }
+  });
   search.addEventListener("input", () => { page = 0; render(); });
-  typeFilter.addEventListener("change", () => { page = 0; render(); });
   previous.addEventListener("click", () => { page -= 1; render(); });
   next.addEventListener("click", () => { page += 1; render(); });
   render();
@@ -207,27 +230,39 @@ function customerDashboard(data) {
         ${accountSection}
         ${account ? `
         <section class="card section-card history-card">
-          <div class="section-title"><div><div class="eyebrow">YOUR MONEY, IN MOTION</div><h2>Transaction history</h2></div><span class="history-count">${transactions.length} total</span></div>
+          <div class="section-title"><div><div class="eyebrow">YOUR MONEY, IN MOTION</div><h2>Transaction history</h2></div><span id="history-total" class="history-count">${transactions.length} total</span></div>
+          <form id="history-filter" class="history-filter">
+            <div class="field"><label for="history-from">From</label><input id="history-from" name="fromDate" type="date"></div>
+            <div class="field"><label for="history-to">To</label><input id="history-to" name="toDate" type="date"></div>
+            <div class="field"><label for="history-type">Type</label><select id="history-type" name="type"><option value="ALL">All activity</option><option value="DEPOSIT">Deposits</option><option value="WITHDRAWAL">Withdrawals</option></select></div>
+            <button class="button button-secondary" type="submit">Apply filters</button>
+          </form>
           <div class="history-tools">
             <label class="history-search-wrap"><span aria-hidden="true">⌕</span><input id="history-search" type="search" placeholder="Search ID, date or method" aria-label="Search transaction history"></label>
-            <select id="history-type" aria-label="Filter transaction type"><option value="ALL">All activity</option><option value="DEPOSIT">Deposits</option><option value="WITHDRAWAL">Withdrawals</option></select>
           </div>
+          <div id="history-message" class="hidden"></div>
           <div id="transaction-list" class="transaction-list" aria-live="polite"></div>
           <div class="history-pagination"><span id="history-page"></span><div><button class="page-button" id="history-previous" type="button" aria-label="Previous page">←</button><button class="page-button" id="history-next" type="button" aria-label="Next page">→</button></div></div>
         </section>` : ""}
         ${account ? `
         <section class="card section-card">
-          <div class="section-title"><div><div class="eyebrow">YOUR PROFILE</div><h2>Account details</h2></div><span>Personal information</span></div>
-          <div class="detail-list">
-            <div class="detail-item"><span>Account holder</span><strong>${escapeHtml(account.name)}</strong></div>
-            <div class="detail-item"><span>Customer ID</span><strong>${escapeHtml(account.customerId)}</strong></div>
-            <div class="detail-item"><span>Phone</span><strong>${escapeHtml(account.phone)}</strong></div>
-            <div class="detail-item"><span>Address</span><strong>${escapeHtml(account.address)}</strong></div>
-          </div>
+          <div class="section-title"><div><div class="eyebrow">YOUR PROFILE</div><h2>Account details</h2></div><span>${escapeHtml(account.customerId)}</span></div>
+          <form id="profile-form">
+            <div class="hidden" data-message></div>
+            <div class="field"><label for="profile-name">Full name</label><input id="profile-name" name="name" autocomplete="name" value="${escapeHtml(account.name)}" required></div>
+            <div class="field"><label for="profile-phone">Phone number</label><input id="profile-phone" name="phone" inputmode="numeric" maxlength="10" value="${escapeHtml(account.phone)}" required></div>
+            <div class="field"><label for="profile-address">Address</label><input id="profile-address" name="address" autocomplete="street-address" value="${escapeHtml(account.address)}" required></div>
+            <button class="button button-secondary button-block" type="submit">Save profile</button>
+          </form>
+        </section>` : ""}
+        ${account && account.status !== "ACTIVE" ? `
+        <section class="card section-card">
+          <div class="section-title"><h2>Account is closed</h2><span class="status-pill">${escapeHtml(account.status)}</span></div>
+          <p class="helper-copy">Transactions and transfers are unavailable for this account. Contact an administrator if you need help.</p>
         </section>` : ""}
       </div>
       <div class="stack">
-        ${account ? `
+        ${account && account.status === "ACTIVE" ? `
         <section class="card section-card">
           <div class="section-title"><div><div class="eyebrow">QUICK ACTIONS</div><h2>Move money</h2></div></div>
           <div class="tab-row" role="tablist" aria-label="Transaction type">
@@ -241,6 +276,17 @@ function customerDashboard(data) {
             <div class="field" id="mode-field"><label for="mode">Deposit method</label><select id="mode" name="mode"><option value="CASH">Cash</option><option value="CHEQUE">Cheque</option></select></div>
             <button class="button button-block" type="submit">Deposit funds</button>
             <p class="helper-copy">Amounts are validated and saved to your transaction history.</p>
+          </form>
+        </section>` : ""}
+        ${account && account.status === "ACTIVE" ? `
+        <section class="card section-card">
+          <div class="section-title"><div><div class="eyebrow">BETWEEN NORTHSTAR ACCOUNTS</div><h2>Transfer money</h2></div></div>
+          <form id="transfer-form">
+            <div class="hidden" data-message></div>
+            <div class="field"><label for="destination-account">Recipient account number</label><input id="destination-account" name="destinationAccountNo" autocomplete="off" placeholder="Enter destination account" required></div>
+            <div class="field"><label for="transfer-amount">Amount (INR)</label><input id="transfer-amount" name="amount" inputmode="decimal" placeholder="e.g. 500.00" required></div>
+            <button class="button button-block" type="submit">Review &amp; transfer</button>
+            <p class="helper-copy">Transfers are recorded in the history of both accounts. Check the recipient account before continuing.</p>
           </form>
         </section>` : ""}
         <section class="card section-card">
@@ -258,6 +304,12 @@ function customerDashboard(data) {
   document.querySelector("#refresh-button").addEventListener("click", renderDashboard);
   document.querySelector("#logout-button").addEventListener("click", logout);
   if (account) bindTransactionHistory(transactions);
+  const profileForm = document.querySelector("#profile-form");
+  if (profileForm) {
+    bindForm(profileForm, "/api/customer/update", async () => {
+      await renderDashboard();
+    });
+  }
   const transactionForm = document.querySelector("#transaction-form");
   if (transactionForm) {
     document.querySelectorAll("[data-type]").forEach((tab) => tab.addEventListener("click", () => {
@@ -279,6 +331,24 @@ function customerDashboard(data) {
     });
   }
   bindForm(document.querySelector("#pin-form"), "/api/change-pin");
+  const transferForm = document.querySelector("#transfer-form");
+  if (transferForm) {
+    bindForm(
+      transferForm,
+      "/api/transfer",
+      async (result) => {
+        await renderDashboard();
+        const notice = document.createElement("div");
+        notice.className = "form-success";
+        notice.textContent =
+          `Transfer ${result.txnId} completed. Updated balance: ${money(result.balancePaise)}.`;
+        app.querySelector(".dashboard-header").after(notice);
+      },
+      (values) => window.confirm(
+        `Transfer ₹${values.amount} to account ${values.destinationAccountNo}?`
+      )
+    );
+  }
 }
 
 async function adminDashboard(data) {
@@ -307,6 +377,28 @@ async function adminDashboard(data) {
             <div class="field"><label for="unlockUserId">Customer login ID</label><input id="unlockUserId" name="userId" placeholder="e.g. CUST0001" required></div>
             <button class="button button-secondary button-block" type="submit">Unlock account</button>
           </form>
+        </section>
+        <section class="card section-card">
+          <div class="section-title"><div><div class="eyebrow">CUSTOMER SERVICES</div><h2>Find and manage customers</h2></div></div>
+          <form id="customer-search-form">
+            <div class="hidden" data-message></div>
+            <div class="field"><label for="customer-search-field">Search by</label><select id="customer-search-field" name="field"><option value="CUSTOMER_ID">Customer ID</option><option value="CUSTOMER_NAME">Name contains</option><option value="PHONE">Phone number</option><option value="ACCOUNT_NUMBER">Account number</option></select></div>
+            <div class="field"><label for="customer-search-query">Search value</label><input id="customer-search-query" name="query" placeholder="Enter customer details" required></div>
+            <button class="button button-secondary button-block" type="submit">Search customers</button>
+          </form>
+          <div id="customer-search-results" class="search-results" aria-live="polite"></div>
+        </section>
+        <section class="card section-card">
+          <div class="section-title"><div><div class="eyebrow">COMPLIANCE</div><h2>Audit log review</h2></div></div>
+          <form id="audit-form">
+            <div class="hidden" data-message></div>
+            <div class="field"><label for="audit-date">Date</label><input id="audit-date" name="date" type="date"></div>
+            <div class="field"><label for="audit-event">Event contains</label><input id="audit-event" name="event" placeholder="e.g. TRANSFER"></div>
+            <div class="field"><label for="audit-account">Account / user</label><input id="audit-account" name="account" placeholder="Optional"></div>
+            <div class="field"><label for="audit-result">Result contains</label><input id="audit-result" name="result" placeholder="e.g. SUCCESS"></div>
+            <button class="button button-secondary button-block" type="submit">Review audit records</button>
+          </form>
+          <div id="audit-results" class="audit-results" aria-live="polite"></div>
         </section>
       </div>
       <div class="stack">
@@ -338,7 +430,132 @@ async function adminDashboard(data) {
   });
   bindForm(document.querySelector("#unlock-form"), "/api/admin/unlock");
   bindForm(document.querySelector("#pin-form"), "/api/change-pin");
+  bindCustomerSearch();
+  bindAuditReview();
   await loadAdminStatus();
+}
+
+function customerSearchCards(records) {
+  return records.map(({ customer, accounts }) => `
+    <article class="customer-result">
+      <div class="customer-result-heading">
+        <div><h3>${escapeHtml(customer.name)}</h3><span>${escapeHtml(customer.customerId)}</span></div>
+        <span>${accounts.length} account${accounts.length === 1 ? "" : "s"}</span>
+      </div>
+      <form class="customer-edit-form" data-customer-id="${escapeHtml(customer.customerId)}">
+        <div class="hidden" data-message></div>
+        <input type="hidden" name="customerId" value="${escapeHtml(customer.customerId)}">
+        <div class="field"><label>Name</label><input name="name" value="${escapeHtml(customer.name)}" required></div>
+        <div class="field"><label>Phone</label><input name="phone" inputmode="numeric" maxlength="10" value="${escapeHtml(customer.phone)}" required></div>
+        <div class="field"><label>Address</label><input name="address" value="${escapeHtml(customer.address)}" required></div>
+        <button class="button button-secondary button-block" type="submit">Save customer details</button>
+      </form>
+      <div class="customer-accounts">
+        ${accounts.length ? accounts.map((account) => {
+          const canClose = account.status === "ACTIVE" && BigInt(account.balancePaise) === 0n;
+          return `<div class="customer-account-row">
+            <div><strong>${escapeHtml(account.accountNo)}</strong><span>${escapeHtml(account.status)} · ${money(account.balancePaise)}</span></div>
+            <button class="button button-danger close-account-button" type="button" data-account-no="${escapeHtml(account.accountNo)}" ${canClose ? "" : "disabled"}>${account.status === "CLOSED" ? "Closed" : "Close account"}</button>
+          </div>`;
+        }).join("") : '<p class="helper-copy">No linked accounts.</p>'}
+      </div>
+    </article>`).join("");
+}
+
+function bindCustomerSearch() {
+  const form = document.querySelector("#customer-search-form");
+  const results = document.querySelector("#customer-search-results");
+  let lastValues = null;
+  const runSearch = async (values) => {
+    try {
+      const result = await api("/api/admin/search-customers", values);
+      results.innerHTML = customerSearchCards(result.results);
+      results.querySelectorAll(".customer-edit-form").forEach((editForm) => {
+        bindForm(editForm, "/api/customer/update", async () => {
+          await runSearch(lastValues);
+        });
+      });
+      results.querySelectorAll(".close-account-button").forEach((button) => {
+        button.addEventListener("click", async () => {
+          if (!window.confirm(`Close account ${button.dataset.accountNo}? Only an account with zero balance can be closed.`)) return;
+          button.disabled = true;
+          try {
+            await api("/api/admin/close-account", {
+              accountNo: button.dataset.accountNo,
+              confirmed: "yes"
+            });
+            await runSearch(lastValues);
+            await loadAdminStatus();
+          } catch (error) {
+            const message = document.createElement("div");
+            message.className = "form-error";
+            message.textContent = error.message;
+            button.closest(".customer-result").prepend(message);
+            button.disabled = false;
+          }
+        });
+      });
+    } catch (error) {
+      results.innerHTML = `<div class="form-error">${escapeHtml(error.message)}</div>`;
+    }
+  };
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    clearMessage(form);
+    lastValues = Object.fromEntries(new FormData(form).entries());
+    await runSearch(lastValues);
+  });
+}
+
+function bindAuditReview() {
+  const form = document.querySelector("#audit-form");
+  const results = document.querySelector("#audit-results");
+  let records = [];
+  let page = 0;
+  const pageSize = 10;
+
+  const render = () => {
+    const pageRecords = records.slice(page * pageSize, (page + 1) * pageSize);
+    const rows = pageRecords.map((record) => `
+      <tr>
+        <td>${escapeHtml(record.timestamp)}</td>
+        <td>${escapeHtml(record.event)}</td>
+        <td>${escapeHtml(record.account)}</td>
+        <td>${escapeHtml(record.result)}</td>
+        <td>${escapeHtml(record.details)}</td>
+      </tr>`).join("");
+    results.innerHTML = records.length ? `
+      <p class="helper-copy">${records.length} matching audit record${records.length === 1 ? "" : "s"}</p>
+      <div class="table-scroll"><table class="audit-table"><thead><tr><th>Time</th><th>Event</th><th>Account / user</th><th>Result</th><th>Details</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="history-pagination"><span>${page * pageSize + 1}–${Math.min((page + 1) * pageSize, records.length)} of ${records.length}</span><div><button class="page-button" data-audit-page="-1" type="button" aria-label="Previous audit page" ${page === 0 ? "disabled" : ""}>←</button><button class="page-button" data-audit-page="1" type="button" aria-label="Next audit page" ${page >= Math.ceil(records.length / pageSize) - 1 ? "disabled" : ""}>→</button></div></div>` :
+      '<div class="empty-state">No matching audit records.</div>';
+    results.querySelectorAll("[data-audit-page]").forEach((button) => {
+      button.addEventListener("click", () => {
+        page += Number(button.dataset.auditPage);
+        render();
+      });
+    });
+  };
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    clearMessage(form);
+    const submit = form.querySelector('[type="submit"]');
+    submit.disabled = true;
+    try {
+      const result = await api(
+        "/api/admin/audit",
+        Object.fromEntries(new FormData(form).entries())
+      );
+      records = result.records;
+      page = 0;
+      render();
+    } catch (error) {
+      showMessage(form, error.message);
+    } finally {
+      submit.disabled = false;
+    }
+  });
 }
 
 async function loadAdminStatus() {

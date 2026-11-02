@@ -27,6 +27,7 @@
 #endif
 
 #include "domain/Status.h"
+#include "domain/Transaction.h"
 #include "infra/InputValidator.h"
 #include "service/AccountDetailsService.h"
 #include "service/SessionManager.h"
@@ -360,6 +361,26 @@ std::string get(const std::map<std::string, std::string>& values,
     return found == values.end() ? std::string() : found->second;
 }
 
+std::string transactionsJson(
+    const std::vector<domain::Transaction>& records
+) {
+    std::string result = "[";
+    bool first = true;
+    for (const auto& item : records) {
+        if (!first) result += ',';
+        first = false;
+        result += "{\"txnId\":" + jsonString(item.txnId) +
+            ",\"type\":" + jsonString(domain::toString(item.type)) +
+            ",\"amountPaise\":" +
+                jsonString(std::to_string(item.amountPaise)) +
+            ",\"balanceAfterPaise\":" +
+                jsonString(std::to_string(item.balanceAfterPaise)) +
+            ",\"counterparty\":" + jsonString(item.counterparty) +
+            ",\"timestamp\":" + jsonString(item.timestamp) + "}";
+    }
+    return result + "]";
+}
+
 } // namespace
 
 struct LocalWebServer::Impl {
@@ -370,7 +391,11 @@ struct LocalWebServer::Impl {
     infra::CustomerAccountStore& customerData;
     TransactionService& transactionService;
     AccountService& accountService;
+    CustomerUpdateService& customerUpdateService;
     AccountUnlockService& unlockService;
+    CustomerSearchService& customerSearchService;
+    AccountClosureService& accountClosureService;
+    AuditLogReviewService& auditLogReviewService;
     SystemStatusService& systemStatusService;
     AuthService& authService;
     std::map<std::string, SessionManager> sessions;
@@ -383,7 +408,11 @@ struct LocalWebServer::Impl {
         infra::CustomerAccountStore& customerAccountStore,
         TransactionService& txnService,
         AccountService& acctService,
+        CustomerUpdateService& customerUpdates,
         AccountUnlockService& acctUnlockService,
+        CustomerSearchService& customerSearch,
+        AccountClosureService& accountClosure,
+        AuditLogReviewService& auditLogReview,
         SystemStatusService& statusService,
         AuthService& authenticationService
     )
@@ -394,7 +423,11 @@ struct LocalWebServer::Impl {
           customerData(customerAccountStore),
           transactionService(txnService),
           accountService(acctService),
+          customerUpdateService(customerUpdates),
           unlockService(acctUnlockService),
+          customerSearchService(customerSearch),
+          accountClosureService(accountClosure),
+          auditLogReviewService(auditLogReview),
           systemStatusService(statusService),
           authService(authenticationService) {}
 
@@ -489,28 +522,13 @@ struct LocalWebServer::Impl {
                 ",\"name\":" + jsonString(result.customer.name) +
                 ",\"phone\":" + jsonString(result.customer.phone) +
                 ",\"address\":" + jsonString(result.customer.address) +
-                "},\"transactions\":[";
-
-            bool first = true;
-            const auto& all = transactions.all();
-            for (auto item = all.rbegin(); item != all.rend(); ++item) {
-                if (item->accountNo != account->accountNo ||
-                    item->state != domain::TxnState::COMMITTED) {
-                    continue;
-                }
-                if (!first) body += ',';
-                first = false;
-                body += "{\"txnId\":" + jsonString(item->txnId) +
-                    ",\"type\":" + jsonString(domain::toString(item->type)) +
-                    ",\"amountPaise\":" +
-                    jsonString(std::to_string(item->amountPaise)) +
-                    ",\"balanceAfterPaise\":" + jsonString(
-                        std::to_string(item->balanceAfterPaise)
-                    ) +
-                    ",\"counterparty\":" + jsonString(item->counterparty) +
-                    ",\"timestamp\":" + jsonString(item->timestamp) + "}";
+                "},\"transactions\":";
+            const auto history =
+                transactionService.getHistory(account->accountNo);
+            if (history.status != TxnStatus::OK) {
+                return error(500, "Could not load transaction history.");
             }
-            body += "]}";
+            body += transactionsJson(history.records) + "}";
             return response(200, body);
         }
 
@@ -661,6 +679,43 @@ struct LocalWebServer::Impl {
                 ? me(*activeSession)
                 : error(405, "Method not allowed.");
         }
+        if (request.path == "/api/history") {
+            if (request.method != "POST") {
+                return error(405, "Method not allowed.");
+            }
+            if (!roleMatches(*activeSession, infra::Role::CUSTOMER)) {
+                return error(403, "Customer access is required.");
+            }
+            const auto* account =
+                accounts.findByCustomer(activeSession->getUserId());
+            if (account == nullptr) {
+                return error(404, "No bank account is linked to this user.");
+            }
+            std::optional<domain::TxnType> type;
+            const std::string typeText = get(request.form, "type");
+            if (typeText == "DEPOSIT") {
+                type = domain::TxnType::DEPOSIT;
+            } else if (typeText == "WITHDRAWAL") {
+                type = domain::TxnType::WITHDRAWAL;
+            } else if (!typeText.empty() && typeText != "ALL") {
+                return error(400, "Choose a valid transaction type.");
+            }
+            const auto history = transactionService.getHistory(
+                account->accountNo,
+                get(request.form, "fromDate"),
+                get(request.form, "toDate"),
+                type
+            );
+            if (history.status != TxnStatus::OK) {
+                return error(400, history.status == TxnStatus::INVALID_INPUT
+                    ? "Enter valid dates in YYYY-MM-DD order."
+                    : transactionError(history.status));
+            }
+            return response(200,
+                "{\"ok\":true,\"transactions\":" +
+                transactionsJson(history.records) + "}"
+            );
+        }
         if (request.path == "/api/transaction") {
             if (request.method != "POST") {
                 return error(405, "Method not allowed.");
@@ -707,6 +762,70 @@ struct LocalWebServer::Impl {
                 jsonString(std::to_string(result.newBalancePaise)) + "}"
             );
         }
+        if (request.path == "/api/transfer") {
+            if (request.method != "POST") {
+                return error(405, "Method not allowed.");
+            }
+            if (!roleMatches(*activeSession, infra::Role::CUSTOMER)) {
+                return error(403, "Customer access is required.");
+            }
+            const auto* source =
+                accounts.findByCustomer(activeSession->getUserId());
+            if (source == nullptr) {
+                return error(404, "No bank account is linked to this user.");
+            }
+            long long amountPaise = 0;
+            if (!infra::InputValidator::parseAmountPaise(
+                    get(request.form, "amount"), amountPaise)) {
+                return error(400, "Enter a valid positive amount (maximum two decimal places).");
+            }
+            const std::string destinationAccountNo =
+                get(request.form, "destinationAccountNo");
+            const auto result = transactionService.transfer(
+                source->accountNo, destinationAccountNo, amountPaise
+            );
+            if (result.status != TxnStatus::OK) {
+                return error(result.status == TxnStatus::STORAGE_FAILURE
+                    ? 500 : 400, transactionError(result.status));
+            }
+            return response(200,
+                "{\"ok\":true,\"txnId\":" + jsonString(result.txnId) +
+                ",\"balancePaise\":" +
+                jsonString(std::to_string(result.newBalancePaise)) + "}"
+            );
+        }
+        if (request.path == "/api/customer/update") {
+            if (request.method != "POST") {
+                return error(405, "Method not allowed.");
+            }
+            std::string customerId;
+            if (roleMatches(*activeSession, infra::Role::CUSTOMER)) {
+                customerId = activeSession->getUserId();
+            } else if (roleMatches(*activeSession, infra::Role::ADMIN)) {
+                customerId = get(request.form, "customerId");
+            } else {
+                return error(403, "Customer or administrator access is required.");
+            }
+            if (!customerData.load()) {
+                return error(500, "Could not load customer records.");
+            }
+            domain::Customer customer;
+            customer.customerId = customerId;
+            customer.name = get(request.form, "name");
+            customer.phone = get(request.form, "phone");
+            customer.address = get(request.form, "address");
+            const auto status =
+                customerUpdateService.updateCustomer(*activeSession, customer);
+            if (status != domain::Status::OK) {
+                return error(status == domain::Status::STORAGE_FAILURE ? 500 :
+                    status == domain::Status::NOT_FOUND ? 404 :
+                    status == domain::Status::UNAUTHORIZED ? 403 : 400,
+                    status == domain::Status::INVALID_INPUT
+                        ? "Enter a name, 10-digit phone number, and address."
+                        : "Could not update this customer profile.");
+            }
+            return response(200, "{\"ok\":true}");
+        }
         if (request.path == "/api/change-pin") {
             if (request.method != "POST") {
                 return error(405, "Method not allowed.");
@@ -732,6 +851,126 @@ struct LocalWebServer::Impl {
             return request.method == "GET"
                 ? adminStatus(*activeSession)
                 : error(405, "Method not allowed.");
+        }
+        if (request.path == "/api/admin/search-customers") {
+            if (request.method != "POST") {
+                return error(405, "Method not allowed.");
+            }
+            if (!roleMatches(*activeSession, infra::Role::ADMIN)) {
+                return error(403, "Administrator access is required.");
+            }
+            if (!customerData.load()) {
+                return error(500, "Could not load customer records.");
+            }
+            CustomerSearchField field;
+            const std::string fieldText = get(request.form, "field");
+            if (fieldText == "CUSTOMER_ID") {
+                field = CustomerSearchField::CUSTOMER_ID;
+            } else if (fieldText == "CUSTOMER_NAME") {
+                field = CustomerSearchField::CUSTOMER_NAME;
+            } else if (fieldText == "PHONE") {
+                field = CustomerSearchField::PHONE;
+            } else if (fieldText == "ACCOUNT_NUMBER") {
+                field = CustomerSearchField::ACCOUNT_NUMBER;
+            } else {
+                return error(400, "Choose a valid customer search field.");
+            }
+            std::vector<CustomerSearchRecord> records;
+            const auto status = customerSearchService.search(
+                *activeSession, field, get(request.form, "query"), records
+            );
+            if (status != domain::Status::OK) {
+                return error(status == domain::Status::NOT_FOUND ? 404 :
+                    status == domain::Status::UNAUTHORIZED ? 403 : 400,
+                    status == domain::Status::NOT_FOUND
+                        ? "No matching customers were found."
+                        : "Enter a search value to find customer records.");
+            }
+            std::string body = "{\"ok\":true,\"results\":[";
+            bool first = true;
+            for (const auto& record : records) {
+                if (!first) body += ',';
+                first = false;
+                body += "{\"customer\":{\"customerId\":" +
+                    jsonString(record.customer.customerId) +
+                    ",\"name\":" + jsonString(record.customer.name) +
+                    ",\"phone\":" + jsonString(record.customer.phone) +
+                    ",\"address\":" + jsonString(record.customer.address) +
+                    "},\"accounts\":[";
+                bool firstAccount = true;
+                for (const auto& account : record.accounts) {
+                    if (!firstAccount) body += ',';
+                    firstAccount = false;
+                    body += "{\"accountNo\":" +
+                        jsonString(account.accountNo) +
+                        ",\"status\":" + jsonString(account.status) +
+                        ",\"balancePaise\":" +
+                        jsonString(std::to_string(account.balancePaise)) +
+                        "}";
+                }
+                body += "]}";
+            }
+            body += "]}";
+            return response(200, body);
+        }
+        if (request.path == "/api/admin/close-account") {
+            if (request.method != "POST") {
+                return error(405, "Method not allowed.");
+            }
+            if (!roleMatches(*activeSession, infra::Role::ADMIN)) {
+                return error(403, "Administrator access is required.");
+            }
+            if (get(request.form, "confirmed") != "yes") {
+                return error(400, "Confirm account closure before continuing.");
+            }
+            if (!accounts.load().isOk()) {
+                return error(500, "Could not load account records.");
+            }
+            const auto status = accountClosureService.closeAccount(
+                *activeSession, get(request.form, "accountNo")
+            );
+            if (status != domain::Status::OK) {
+                return error(status == domain::Status::NOT_FOUND ? 404 :
+                    status == domain::Status::UNAUTHORIZED ? 403 :
+                    status == domain::Status::STORAGE_FAILURE ? 500 : 400,
+                    status == domain::Status::INVALID_INPUT
+                        ? "Only active accounts with a zero balance can be closed."
+                        : "Could not close this account.");
+            }
+            return response(200, "{\"ok\":true}");
+        }
+        if (request.path == "/api/admin/audit") {
+            if (request.method != "POST") {
+                return error(405, "Method not allowed.");
+            }
+            if (!roleMatches(*activeSession, infra::Role::ADMIN)) {
+                return error(403, "Administrator access is required.");
+            }
+            AuditLogFilter filter;
+            filter.date = get(request.form, "date");
+            filter.event = get(request.form, "event");
+            filter.account = get(request.form, "account");
+            filter.result = get(request.form, "result");
+            std::vector<AuditLogRecord> records;
+            const auto status =
+                auditLogReviewService.review(*activeSession, filter, records);
+            if (status != domain::Status::OK) {
+                return error(status == domain::Status::UNAUTHORIZED ? 403 : 500,
+                    "Could not review the audit log.");
+            }
+            std::string body = "{\"ok\":true,\"records\":[";
+            bool first = true;
+            for (const auto& record : records) {
+                if (!first) body += ',';
+                first = false;
+                body += "{\"timestamp\":" + jsonString(record.timestamp) +
+                    ",\"event\":" + jsonString(record.event) +
+                    ",\"account\":" + jsonString(record.account) +
+                    ",\"result\":" + jsonString(record.result) +
+                    ",\"details\":" + jsonString(record.details) + "}";
+            }
+            body += "]}";
+            return response(200, body);
         }
         if (request.path == "/api/admin/create-account") {
             if (request.method != "POST") {
@@ -830,14 +1069,19 @@ LocalWebServer::LocalWebServer(
     infra::CustomerAccountStore& customerData,
     TransactionService& transactionService,
     AccountService& accountService,
+    CustomerUpdateService& customerUpdateService,
     AccountUnlockService& unlockService,
+    CustomerSearchService& customerSearchService,
+    AccountClosureService& accountClosureService,
+    AuditLogReviewService& auditLogReviewService,
     SystemStatusService& systemStatusService,
     AuthService& authService
 )
     : impl_(std::make_unique<Impl>(
           login, credentials, accounts, transactions, customerData,
-          transactionService, accountService, unlockService,
-          systemStatusService, authService
+          transactionService, accountService, customerUpdateService,
+          unlockService, customerSearchService, accountClosureService,
+          auditLogReviewService, systemStatusService, authService
       )) {}
 
 LocalWebServer::~LocalWebServer() = default;

@@ -159,6 +159,11 @@ h1 { margin: 17px 0 18px; color: var(--navy); font: 700 clamp(38px, 5vw, 58px)/1
 .history-card { min-width: 0; }
 .history-count { padding: 6px 10px; color: #81504a !important; background: #f6eee4; border-radius: 20px; font-weight: 700; white-space: nowrap; }
 .history-tools { display: flex; gap: 9px; margin-bottom: 12px; }
+.history-filter { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; gap: 10px; margin-bottom: 12px; padding: 14px; background: #faf5ed; border: 1px solid #eee3d7; border-radius: 12px; }
+.history-filter .field { min-width: 0; gap: 6px; margin: 0; }
+.history-filter .field label { font-size: 11px; }
+.history-filter input, .history-filter select { width: 100%; height: 38px; padding: 0 9px; color: var(--ink); background: #fffefa; border: 1px solid #e6d9ca; border-radius: 8px; font-size: 12px; }
+.history-filter .button { min-height: 38px; padding: 0 12px; white-space: nowrap; }
 .history-search-wrap { min-width: 0; height: 42px; display: flex; flex: 1; align-items: center; gap: 8px; padding: 0 11px; color: #9b8779; background: #fffefa; border: 1px solid #e8dccd; border-radius: 9px; }
 .history-search-wrap:focus-within { border-color: #b45b54; box-shadow: 0 0 0 3px rgba(166,60,60,.1); }
 .history-search-wrap > span { font-size: 20px; line-height: 1; }
@@ -177,6 +182,27 @@ h1 { margin: 17px 0 18px; color: var(--navy); font: 700 clamp(38px, 5vw, 58px)/1
 .tab.active { color: var(--navy); background: white; box-shadow: 0 1px 3px rgba(84,39,42,.12); }
 .helper-copy { margin: 14px 0 0; color: #8997a2; font-size: 11px; line-height: 1.5; }
 .admin-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, .8fr); gap: 20px; align-items: start; }
+.search-results, .audit-results { display: grid; gap: 12px; margin-top: 16px; }
+.customer-result { padding: 16px; background: #fcf8f2; border: 1px solid #eee3d7; border-radius: 12px; }
+.customer-result-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
+.customer-result-heading h3 { margin: 0 0 4px; color: var(--navy); font-size: 15px; }
+.customer-result-heading span { color: var(--muted); font-size: 11px; }
+.customer-edit-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; }
+.customer-edit-form .field { min-width: 0; }
+.customer-edit-form .field:nth-of-type(3) { grid-column: 1 / -1; }
+.customer-edit-form .button { grid-column: 1 / -1; margin: 0 0 14px; }
+.customer-accounts { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid #eee3d7; }
+.customer-account-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.customer-account-row > div { min-width: 0; display: grid; gap: 4px; }
+.customer-account-row strong { overflow-wrap: anywhere; color: #503c35; font-size: 12px; }
+.customer-account-row span { color: var(--muted); font-size: 11px; }
+.close-account-button { min-height: 34px; padding: 0 10px; font-size: 11px; white-space: nowrap; }
+.close-account-button:disabled { opacity: .58; cursor: not-allowed; }
+.table-scroll { overflow-x: auto; }
+.audit-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.audit-table th, .audit-table td { max-width: 230px; padding: 9px 10px; overflow-wrap: anywhere; border-bottom: 1px solid #eee3d7; text-align: left; vertical-align: top; }
+.audit-table th { color: #76574d; background: #faf5ed; font-size: 10px; letter-spacing: .3px; white-space: nowrap; }
+.audit-table td { color: #59463e; }
 .admin-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .stat-card { padding: 18px 16px; background: #fbf7f0; border: 1px solid var(--line); border-radius: 12px; }
 .stat-label { margin-bottom: 8px; color: var(--muted); font-size: 11px; }
@@ -221,7 +247,12 @@ h1 { margin: 17px 0 18px; color: var(--navy); font: 700 clamp(38px, 5vw, 58px)/1
   .activity-stat { padding: 14px; }
   .history-tools { align-items: stretch; flex-direction: column; }
   .history-tools select { width: 100%; }
+  .history-filter { grid-template-columns: 1fr 1fr; }
+  .history-filter .button { grid-column: 1 / -1; }
   .transaction-row { grid-template-columns: 34px minmax(0, 1fr) auto; gap: 9px; }
+  .customer-edit-form { grid-template-columns: 1fr; }
+  .customer-edit-form .field:nth-of-type(3), .customer-edit-form .button { grid-column: auto; }
+  .customer-account-row { align-items: flex-start; flex-direction: column; }
   .transaction-icon { width: 32px; height: 32px; }
   .transaction-values .transaction-meta { max-width: 94px; font-size: 10px; }
   .admin-stats { gap: 7px; }

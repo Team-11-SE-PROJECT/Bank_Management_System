@@ -11,8 +11,12 @@
 #include "infra/LoginService.h"
 #include "infra/TransactionRepository.h"
 #include "service/AccountService.h"
+#include "service/AccountClosureService.h"
 #include "service/AccountUnlockService.h"
+#include "service/AuditLogReviewService.h"
 #include "service/AuthService.h"
+#include "service/CustomerSearchService.h"
+#include "service/CustomerUpdateService.h"
 #include "service/LocalWebServer.h"
 #include "service/SystemStatusService.h"
 #include "service/TransactionService.h"
@@ -83,6 +87,10 @@ int main(int argc, char* argv[]) {
     }
 
     bms::infra::AuditLogger audit("data/audit.log");
+    bms::service::CustomerUpdateService customerUpdateService(customerData);
+    bms::service::CustomerSearchService customerSearchService(customerData);
+    bms::service::AccountClosureService accountClosureService(accounts, &audit);
+    bms::service::AuditLogReviewService auditLogReviewService("data/audit.log");
     bms::infra::Journal journal("data/journal.dat");
     const auto journalStatus = journal.load();
     if (journalStatus == bms::infra::LoadStatus::CORRUPT) {
@@ -98,14 +106,14 @@ int main(int argc, char* argv[]) {
                   << " journal entries reconciled.\n";
     }
 
-    bms::infra::LoginService login(credentials);
+    bms::infra::LoginService login(credentials, &audit);
     bms::service::TransactionService transactionService(
         accounts, transactions, config, audit
     );
     transactionService.setJournal(&journal);
-    bms::service::AccountService accountService(customerData, credentials);
-    bms::service::AccountUnlockService unlockService(credentials);
-    bms::service::AuthService authService(credentials);
+    bms::service::AccountService accountService(customerData, credentials, &audit);
+    bms::service::AccountUnlockService unlockService(credentials, &audit);
+    bms::service::AuthService authService(credentials, &audit);
     bms::service::SystemStatusService systemStatusService(
         credentials,
         customerData,
@@ -116,7 +124,9 @@ int main(int argc, char* argv[]) {
 
     bms::service::LocalWebServer server(
         login, credentials, accounts, transactions, customerData,
-        transactionService, accountService, unlockService,
+        transactionService, accountService, customerUpdateService,
+        unlockService, customerSearchService, accountClosureService,
+        auditLogReviewService,
         systemStatusService, authService
     );
 

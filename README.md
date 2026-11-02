@@ -220,7 +220,7 @@ From the repository root, run `./build/bms` on Linux or `.\build\bms.exe` on Win
 
 From the repository root, start `./build/bms_web` on Linux or `.\build\bms_web.exe` on Windows. Optionally pass a port, for example `.\build\bms_web.exe 8081`. Then open the local address printed by the application, normally `http://127.0.0.1:8080/`.
 
-The browser UI supports customer sign-in, balance and account details, cash or cheque deposits, withdrawals, searchable and filterable full transaction history, and PIN changes. Administrators can create customer accounts, unlock customer logins, change their PIN, and view system status. All operations use the existing C++ services and local data files.
+The browser UI supports customer sign-in, balance and account details, profile updates, cash or cheque deposits, withdrawals, account-to-account transfers, and transaction history filtered by date and type. Administrators can create accounts, search customers by ID, name, phone, or account number, update customer profiles, unlock logins, close eligible zero-balance accounts, review filtered audit logs, change their PIN, and view system status. These screens use the existing C++ services and local data files.
 
 The web server binds to loopback only and is intended for local demonstrations. Use either the console app or browser app at a time; they share the same local files. Do not expose the web server to a network or use it for real banking or sensitive production data.
 
