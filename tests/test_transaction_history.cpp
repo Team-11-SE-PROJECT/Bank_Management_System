@@ -174,7 +174,115 @@ static void test_format_history() {
     CHECK(text.find("2250.50") != std::string::npos);    // balance after
     CHECK(text.find("2026-10-23 10:00:00") != std::string::npos);
 }
+// ------------------------------------------------------------
+// Issue #38: filter by date or type
+// ------------------------------------------------------------
 
+// TXN000001 deposit 1000 on 10-22, TXN000002 withdrawal 500 on 10-23
+// (23:59:59), TXN000003 deposit 2000 on 10-24 (00:00:00).
+static void seedThreeDays(Fixture& f) {
+    f.now = "2026-10-22 09:00:00";
+    CHECK(f.svc.deposit("BMS1001", 1000, DepositMode::CASH).status
+          == TxnStatus::OK);
+
+    f.now = "2026-10-23 23:59:59";
+    CHECK(f.svc.withdraw("BMS1001", 500).status == TxnStatus::OK);
+
+    f.now = "2026-10-24 00:00:00";
+    CHECK(f.svc.deposit("BMS1001", 2000, DepositMode::CHEQUE).status
+          == TxnStatus::OK);
+}
+
+static void test_filter_by_type() {
+    Fixture f;
+    seedThreeDays(f);
+
+    const auto deposits =
+        f.svc.getHistory("BMS1001", "", "", TxnType::DEPOSIT);
+    CHECK(deposits.status == TxnStatus::OK);
+    CHECK_EQ(deposits.records.size(), 2u);
+    for (const auto& t : deposits.records) {
+        CHECK(t.type == TxnType::DEPOSIT);
+    }
+
+    const auto withdrawals =
+        f.svc.getHistory("BMS1001", "", "", TxnType::WITHDRAWAL);
+    CHECK_EQ(withdrawals.records.size(), 1u);
+    if (!withdrawals.records.empty()) {
+        CHECK_EQ(withdrawals.records[0].txnId, "TXN000002");
+    }
+
+    CHECK_EQ(f.svc.getHistory("BMS1001").records.size(), 3u);
+}
+
+static void test_filter_by_date_range_is_inclusive() {
+    Fixture f;
+    seedThreeDays(f);
+
+    // One day only: includes 23:59:59, excludes 10-24 00:00:00.
+    const auto oneDay =
+        f.svc.getHistory("BMS1001", "2026-10-23", "2026-10-23");
+    CHECK_EQ(oneDay.records.size(), 1u);
+    if (!oneDay.records.empty()) {
+        CHECK_EQ(oneDay.records[0].txnId, "TXN000002");
+    }
+
+    // From only: newest first.
+    const auto fromOnly = f.svc.getHistory("BMS1001", "2026-10-23");
+    CHECK_EQ(fromOnly.records.size(), 2u);
+    if (fromOnly.records.size() == 2) {
+        CHECK_EQ(fromOnly.records[0].txnId, "TXN000003");
+        CHECK_EQ(fromOnly.records[1].txnId, "TXN000002");
+    }
+
+    // To only.
+    const auto toOnly = f.svc.getHistory("BMS1001", "", "2026-10-23");
+    CHECK_EQ(toOnly.records.size(), 2u);
+}
+
+static void test_filter_by_date_and_type_together() {
+    Fixture f;
+    seedThreeDays(f);
+
+    const auto h =
+        f.svc.getHistory("BMS1001", "2026-10-23", "", TxnType::DEPOSIT);
+    CHECK_EQ(h.records.size(), 1u);
+    if (!h.records.empty()) {
+        CHECK_EQ(h.records[0].amountPaise, 2000);
+    }
+}
+
+static void test_filter_with_no_match_is_ok_and_empty() {
+    Fixture f;
+    seedThreeDays(f);
+
+    const auto h = f.svc.getHistory(
+        "BMS1001", "2026-10-24", "", TxnType::WITHDRAWAL);
+    CHECK(h.status == TxnStatus::OK);
+    CHECK(h.records.empty());
+}
+
+static void test_filter_invalid_dates_rejected() {
+    Fixture f;
+    seedThreeDays(f);
+
+    CHECK(f.svc.getHistory("BMS1001", "2026-13-01").status
+          == TxnStatus::INVALID_INPUT);
+    CHECK(f.svc.getHistory("BMS1001", "2026-02-30").status
+          == TxnStatus::INVALID_INPUT);
+    CHECK(f.svc.getHistory("BMS1001", "23-10-2026").status
+          == TxnStatus::INVALID_INPUT);
+    CHECK(f.svc.getHistory("BMS1001", "", "abc").status
+          == TxnStatus::INVALID_INPUT);
+
+    // from after to
+    CHECK(f.svc.getHistory("BMS1001", "2026-10-24", "2026-10-22").status
+          == TxnStatus::INVALID_INPUT);
+
+    // Leap day is valid.
+    CHECK(f.svc.getHistory("BMS1001", "2028-02-29").status
+          == TxnStatus::OK);
+}
 int main() {
     test_history_lists_committed_transactions_newest_first();
     test_history_shows_one_row_per_transaction();
@@ -183,6 +291,11 @@ int main() {
     test_history_empty_account_and_unknown_account();
     test_history_survives_reload();
     test_format_history();
-
+    
+    test_filter_by_type();
+    test_filter_by_date_range_is_inclusive();
+    test_filter_by_date_and_type_together();
+    test_filter_with_no_match_is_ok_and_empty();
+    test_filter_invalid_dates_rejected();
     return bms::test::summary("test_transaction_history");
 }

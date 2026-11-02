@@ -30,6 +30,31 @@ std::string formatPaise(long long paise) {
     return out.str();
 }
 
+bool isValidDate(const std::string& d) {
+    if (d.size() != 10 || d[4] != '-' || d[7] != '-') return false;
+
+    for (std::size_t i = 0; i < d.size(); ++i) {
+        if (i == 4 || i == 7) continue;
+        if (d[i] < '0' || d[i] > '9') return false;
+    }
+
+    const int year = std::stoi(d.substr(0, 4));
+    const int month = std::stoi(d.substr(5, 2));
+    const int day = std::stoi(d.substr(8, 2));
+
+    if (month < 1 || month > 12 || day < 1) return false;
+
+    static const int daysInMonth[] =
+        {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    int maxDay = daysInMonth[month - 1];
+    if (month == 2 &&
+        ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0)) {
+        maxDay = 29;
+    }
+
+    return day <= maxDay;
+}
+
 } // namespace
 
 const char* toString(TxnStatus status) {
@@ -421,9 +446,19 @@ TxnResult TransactionService::transfer(
 }
 
 HistoryResult TransactionService::getHistory(
-    const std::string& accountNo
+    const std::string& accountNo,
+    const std::string& fromDate,
+    const std::string& toDate,
+    std::optional<domain::TxnType> type
 ) const {
     HistoryResult result;
+
+    if ((!fromDate.empty() && !isValidDate(fromDate)) ||
+        (!toDate.empty() && !isValidDate(toDate)) ||
+        (!fromDate.empty() && !toDate.empty() && fromDate > toDate)) {
+        result.status = TxnStatus::INVALID_INPUT;
+        return result;
+    }
 
     if (!accounts_.find(accountNo)) {
         result.status = TxnStatus::NOT_FOUND;
@@ -446,6 +481,14 @@ HistoryResult TransactionService::getHistory(
         if (latest[t.txnId] != i) continue;
         if (t.state != TxnState::COMMITTED) continue;
         if (t.accountNo != accountNo) continue;
+
+        // timestamp is "YYYY-MM-DD HH:MM:SS"; the date part compares
+        // correctly as text.
+        const std::string day = t.timestamp.substr(0, 10);
+        if (!fromDate.empty() && day < fromDate) continue;
+        if (!toDate.empty() && day > toDate) continue;
+
+        if (type && t.type != *type) continue;
 
         result.records.push_back(t);
     }
