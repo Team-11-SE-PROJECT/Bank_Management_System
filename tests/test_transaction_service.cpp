@@ -892,6 +892,148 @@ static void test_transfer_audit_log_records_success() {
     );
 }
 
+// ------------------------------------------------------------
+// Issue #35: Transfer consistency and rollback on failure
+// ------------------------------------------------------------
+
+static void test_transfer_rolls_back_source_on_destination_failure() {
+    Fixture f;
+    addSecondAccount(f);
+
+    int clockCalls = 0;
+
+    TransactionService svc(
+        f.accounts, f.txns, f.config, f.audit,
+        [&f, &clockCalls] {
+            ++clockCalls;
+
+            // The 2nd clock_() call happens at the start of the
+            // credit leg's finish(), just before its save. Force
+            // that save to fail so the debit leg (1st call) has
+            // already succeeded, triggering the reversal.
+            if (clockCalls == 2) {
+                std::filesystem::create_directory(
+                    f.dir.file("accounts.dat.tmp")
+                );
+            }
+
+            // The 3rd clock_() call happens at the start of the
+            // reversal leg's finish(). Clear the blocking path
+            // first so the reversal's own save can succeed.
+            if (clockCalls == 3) {
+                std::filesystem::remove(
+                    f.dir.file("accounts.dat.tmp")
+                );
+            }
+
+            return f.now;
+        }
+    );
+
+    const auto result = svc.transfer("BMS1001", "BMS1002", 30000);
+
+    CHECK(result.status == TxnStatus::STORAGE_FAILURE);
+
+    // Consistency: source balance must be fully restored, and
+    // the destination must never have been credited.
+    CHECK_EQ(svc.getBalance("BMS1001").newBalancePaise, 100000);
+    CHECK_EQ(svc.getBalance("BMS1002").newBalancePaise, 50000);
+    CHECK_EQ(f.balanceOnDisk(), 100000);
+
+    const std::string log =
+        bms::test::readFile(f.dir.file("audit.log"));
+
+    CHECK(
+        log.find("|TRANSFER|BMS1001|FAILED_STORAGE_FAILURE|")
+        != std::string::npos
+    );
+    CHECK(
+        log.find("rolledBack=true") != std::string::npos
+    );
+}
+
+static void test_transfer_no_partial_effect_on_upfront_validation_failure() {
+    Fixture f;
+    addSecondAccount(f);
+
+    // Validation fails before either leg runs — nothing should
+    // be touched at all.
+    f.accounts.find("BMS1002")->status = "CLOSED";
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 1000);
+
+    CHECK(result.status == TxnStatus::ACCOUNT_CLOSED);
+    CHECK_EQ(f.balance(), 100000);
+    CHECK_EQ(f.svc.getBalance("BMS1002").newBalancePaise, 50000);
+    CHECK_EQ(f.txns.all().size(), 0u);
+}
+
+static void test_transfer_both_legs_atomic_on_success() {
+    Fixture f;
+    addSecondAccount(f);
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 40000);
+
+    CHECK(result.status == TxnStatus::OK);
+
+    // Total money in the system is conserved.
+    const long long total =
+        f.svc.getBalance("BMS1001").newBalancePaise +
+        f.svc.getBalance("BMS1002").newBalancePaise;
+
+    CHECK_EQ(total, 150000);
+}
+
+// ------------------------------------------------------------
+// Issue #36: Escalate when transfer rollback itself fails
+// ------------------------------------------------------------
+
+static void test_transfer_escalates_when_reversal_also_fails() {
+    Fixture f;
+    addSecondAccount(f);
+
+    int clockCalls = 0;
+
+    TransactionService svc(
+        f.accounts, f.txns, f.config, f.audit,
+        [&f, &clockCalls] {
+            ++clockCalls;
+
+            // 2nd call: credit leg's finish() -> force it to fail.
+            // 3rd call: reversal's finish() -> leave it blocked too,
+            // so the reversal also fails (double failure).
+            if (clockCalls == 2) {
+                std::filesystem::create_directory(
+                    f.dir.file("accounts.dat.tmp")
+                );
+            }
+
+            return f.now;
+        }
+    );
+
+    const auto result = svc.transfer("BMS1001", "BMS1002", 30000);
+
+    CHECK(result.status == TxnStatus::STORAGE_FAILURE);
+
+    const std::string log =
+        bms::test::readFile(f.dir.file("audit.log"));
+
+    CHECK(
+        log.find("|TRANSFER_RECONCILIATION_REQUIRED|BMS1001|")
+        != std::string::npos
+    );
+    CHECK(
+        log.find("rolledBack=false") != std::string::npos
+    );
+
+    // Clean up the blocking path so later tests in this process
+    // (if any reuse the same dir) aren't affected.
+    std::filesystem::remove(f.dir.file("accounts.dat.tmp"));
+}
+
 int main() {
     test_deposit_updates_balance_in_memory_and_file();
     test_deposit_unknown_and_closed_account();
@@ -944,5 +1086,12 @@ int main() {
     test_transfer_records_both_legs_in_history();
     test_transfer_survives_repository_reload();
     test_transfer_audit_log_records_success();
+
+    test_transfer_rolls_back_source_on_destination_failure();
+    test_transfer_no_partial_effect_on_upfront_validation_failure();
+    test_transfer_both_legs_atomic_on_success();
+
+    test_transfer_both_legs_atomic_on_success();
+    test_transfer_escalates_when_reversal_also_fails();
     return bms::test::summary("test_transaction_service");
 }

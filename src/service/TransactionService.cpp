@@ -337,6 +337,8 @@ TxnResult TransactionService::transfer(
         const Account* currentSource =
             accounts_.find(sourceAccountNo);
 
+        bool reversalSucceeded = false;
+
         if (currentSource) {
             Account restored = *currentSource;
             restored.balancePaise += amountPaise;
@@ -347,16 +349,35 @@ TxnResult TransactionService::transfer(
             reversalTxn.counterparty = "TRANSFER_REVERSAL";
             reversalTxn.amountPaise = amountPaise;
 
-            finish(restored, reversalTxn);
+            const TxnResult reversalResult =
+                finish(restored, reversalTxn);
+            reversalSucceeded =
+                reversalResult.status == TxnStatus::OK;
         }
 
-        audit_.log(
-            "TRANSFER", sourceAccountNo,
-            "FAILED_" + std::string(toString(creditResult.status)),
-            "destination=" + destinationAccountNo +
-                " amountPaise=" + std::to_string(amountPaise) +
-                " rolledBack=true"
-        );
+        if (reversalSucceeded) {
+            audit_.log(
+                "TRANSFER", sourceAccountNo,
+                "FAILED_" +
+                    std::string(toString(creditResult.status)),
+                "destination=" + destinationAccountNo +
+                    " amountPaise=" + std::to_string(amountPaise) +
+                    " rolledBack=true"
+            );
+        } else {
+            // The reversal itself failed: the source is left
+            // debited with no matching credit anywhere. This
+            // cannot be auto-healed further and needs a human.
+            audit_.log(
+                "TRANSFER_RECONCILIATION_REQUIRED",
+                sourceAccountNo,
+                "FAILED_" +
+                    std::string(toString(creditResult.status)),
+                "destination=" + destinationAccountNo +
+                    " amountPaise=" + std::to_string(amountPaise) +
+                    " rolledBack=false"
+            );
+        }
 
         TxnResult result;
         result.status = creditResult.status;
