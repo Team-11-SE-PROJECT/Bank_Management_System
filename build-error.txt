@@ -1,0 +1,28 @@
+﻿Change Dir: 'C:/Users/ianna/OneDrive/Desktop/Bank_Management_System/build'
+
+Run Build Command(s): "C:/Program Files/CMake/bin/cmake.exe" -E env VERBOSE=1 C:/msys64/ucrt64/bin/mingw32-make.exe -f Makefile
+"C:\Program Files\CMake\bin\cmake.exe" -P C:\Users\ianna\OneDrive\Desktop\Bank_Management_System\build\CMakeFiles\VerifyGlobs.cmake
+"C:\Program Files\CMake\bin\cmake.exe" -SC:\Users\ianna\OneDrive\Desktop\Bank_Management_System -BC:\Users\ianna\OneDrive\Desktop\Bank_Management_System\build --check-build-system CMakeFiles\Makefile.cmake 0
+"C:\Program Files\CMake\bin\cmake.exe" -E cmake_progress_start C:\Users\ianna\OneDrive\Desktop\Bank_Management_System\build\CMakeFiles C:\Users\ianna\OneDrive\Desktop\Bank_Management_System\build\\CMakeFiles\progress.marks
+C:/msys64/ucrt64/bin/mingw32-make.exe  -f CMakeFiles\Makefile2 all
+mingw32-make[1]: Entering directory 'C:/Users/ianna/OneDrive/Desktop/Bank_Management_System/build'
+C:/msys64/ucrt64/bin/mingw32-make.exe  -f CMakeFiles\bms_core.dir\build.make CMakeFiles/bms_core.dir/depend
+mingw32-make[2]: Entering directory 'C:/Users/ianna/OneDrive/Desktop/Bank_Management_System/build'
+"C:\Program Files\CMake\bin\cmake.exe" -E cmake_depends "MinGW Makefiles" C:\Users\ianna\OneDrive\Desktop\Bank_Management_System C:\Users\ianna\OneDrive\Desktop\Bank_Management_System C:\Users\ianna\OneDrive\Desktop\Bank_Management_System\build C:\Users\ianna\OneDrive\Desktop\Bank_Management_System\build C:\Users\ianna\OneDrive\Desktop\Bank_Management_System\build\CMakeFiles\bms_core.dir\DependInfo.cmake "--color=" bms_core
+mingw32-make[2]: Leaving directory 'C:/Users/ianna/OneDrive/Desktop/Bank_Management_System/build'
+C:/msys64/ucrt64/bin/mingw32-make.exe  -f CMakeFiles\bms_core.dir\build.make CMakeFiles/bms_core.dir/build
+mingw32-make[2]: Entering directory 'C:/Users/ianna/OneDrive/Desktop/Bank_Management_System/build'
+[  8%] Building CXX object CMakeFiles/bms_core.dir/src/infra/CredentialStore.cpp.obj
+C:\msys64\ucrt64\bin\g++.exe  @CMakeFiles\bms_core.dir\includes_CXX.rsp -g -std=c++17 -Wall -Wextra -Wpedantic -MD -MT CMakeFiles/bms_core.dir/src/infra/CredentialStore.cpp.obj -MF CMakeFiles\bms_core.dir\src\infra\CredentialStore.cpp.obj.d -o CMakeFiles\bms_core.dir\src\infra\CredentialStore.cpp.obj -c C:\Users\ianna\OneDrive\Desktop\Bank_Management_System\src\infra\CredentialStore.cpp
+cmake : mingw32-make[2]: *** [CMakeFiles\bms_core.dir\build.make:82: CMakeFiles/bms_core.dir/src/infra/CredentialStore.cpp.obj] Error 1
+At line:1 char:1
++ cmake --build build --verbose 2>&1 | Out-File -FilePath build-error.t ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (mingw32-make[2]...pp.obj] Error 1:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+mingw32-make[2]: Leaving directory 'C:/Users/ianna/OneDrive/Desktop/Bank_Management_System/build'
+mingw32-make[1]: *** [CMakeFiles\Makefile2:149: CMakeFiles/bms_core.dir/all] Error 2
+mingw32-make[1]: Leaving directory 'C:/Users/ianna/OneDrive/Desktop/Bank_Management_System/build'
+mingw32-make: *** [Makefile:103: all] Error 2
+

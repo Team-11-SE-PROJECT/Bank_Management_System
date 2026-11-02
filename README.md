@@ -1,6 +1,6 @@
 # Bank Management System (Team 11)
 
-A console-based **Bank Management System** developed in C++17 as part of the Software Engineering mini project. The application simulates essential banking operations, customer and administrator authentication, account management, transaction processing, and access control using local file storage.
+A **Bank Management System** developed in C++17 as part of the Software Engineering mini project. It provides both a console application and a local browser UI for essential banking operations, customer and administrator authentication, account management, transaction processing, and access control using local file storage.
 
 The project follows a structured software engineering workflow, including requirements specification, implementation, and unit testing.
 
@@ -28,7 +28,7 @@ The project follows a structured software engineering workflow, including requir
 
 ## Overview
 
-The Bank Management System provides a menu-driven interface for customers and administrators to perform banking and account-management operations.
+The Bank Management System provides console and browser interfaces for customers and administrators to perform banking and account-management operations.
 
 The system separates customer and administrator privileges, validates user input, maintains account information, and records financial transactions. It also incorporates authentication controls to reduce unauthorized access and protect account operations.
 
@@ -161,7 +161,7 @@ These measures are intended to improve the reliability and security of the banki
 |---|---|
 | Programming Language | C++ |
 | Language Standard | C++17 |
-| Application Interface | Command-line / console |
+| Application Interface | Command-line console and local browser UI |
 | Data Persistence | Local file storage |
 | Testing | Unit tests for core services |
 | Build Environment | C++17-compatible compiler and build tools |
@@ -203,33 +203,26 @@ git clone https://github.com/Team-11-SE-PROJECT/Bank_Management_System.git
 cd Bank_Management_System
 ```
 
-### 2. Build the Application
+### 2. Configure and Build
 
-The project targets C++17. The exact build command depends on the source-file organization and build configuration in the repository.
-
-If the project consists of a single entry-point source file and supporting implementation files, compile the required sources with:
+The CMake build creates both the original console application and the browser UI:
 
 ```bash
-g++ -std=c++17 -Wall -Wextra -pedantic *.cpp -o bank_management_system
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --config Debug
 ```
 
-**Note:** This command is suitable only if all `.cpp` files in the project can be compiled together into one executable. If the repository uses separate test files, multiple entry points, or a dedicated build configuration, use the appropriate build command instead.
+### 3. Run the Console Application
 
-### 3. Run the Application
+From the repository root, run `./build/bms` on Linux or `.\build\bms.exe` on Windows. The existing console menu remains available.
 
-On Linux or WSL:
+### 4. Run the Browser UI
 
-```bash
-./bank_management_system
-```
+From the repository root, start `./build/bms_web` on Linux or `.\build\bms_web.exe` on Windows. Optionally pass a port, for example `.\build\bms_web.exe 8081`. Then open the local address printed by the application, normally `http://127.0.0.1:8080/`.
 
-On Windows, if compiled to an executable:
+The browser UI supports customer sign-in, balance and account details, cash or cheque deposits, withdrawals, searchable and filterable full transaction history, and PIN changes. Administrators can create customer accounts, unlock customer logins, change their PIN, and view system status. All operations use the existing C++ services and local data files.
 
-```powershell
-.\bank_management_system.exe
-```
-
-The application opens a console-based menu through which users can authenticate and access the functionality available to their role.
+The web server binds to loopback only and is intended for local demonstrations. Use either the console app or browser app at a time; they share the same local files. Do not expose the web server to a network or use it for real banking or sensitive production data.
 
 ---
 
@@ -296,9 +289,11 @@ The implementation and validation work covers the following functional areas:
 
 ### Running Tests
 
-Use the test instructions provided by the repository's build configuration or test documentation.
+Run the complete test suite after configuring and building the project:
 
-The exact test command depends on how the unit-test executable and its dependencies are configured.
+```bash
+ctest --test-dir build -C Debug --output-on-failure
+```
 
 When extending the project, tests should cover successful operations, invalid inputs, boundary conditions, and failure scenarios.
 

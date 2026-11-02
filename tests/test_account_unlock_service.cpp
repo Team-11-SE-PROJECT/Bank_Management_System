@@ -1,8 +1,8 @@
 #include "service/AccountUnlockService.h"
 #include "infra/PasswordHasher.h"
 #include "TestHarness.h"
+#include "TestUtil.h"
 
-#include <filesystem>
 #include <string>
 
 using namespace bms::domain;
@@ -22,7 +22,8 @@ Credential makeCredential(const std::string& userId, Role role,
 }
 
 void test_admin_can_unlock_account() {
-    const std::string path = "test_account_unlock.dat";
+    bms::test::TempDir dir;
+    const std::string path = dir.file("credentials.dat");
     CredentialStore store(path);
 
     Credential customer = makeCredential("customer", Role::CUSTOMER, "1234");
@@ -52,12 +53,11 @@ void test_admin_can_unlock_account() {
         CHECK(!persisted->locked);
         CHECK(persisted->failedAttempts == 0);
     }
-
-    std::filesystem::remove(path);
 }
 
 void test_customer_cannot_unlock_account() {
-    const std::string path = "test_account_unlock_customer.dat";
+    bms::test::TempDir dir;
+    const std::string path = dir.file("credentials.dat");
     CredentialStore store(path);
 
     Credential customer = makeCredential("customer", Role::CUSTOMER, "1234");
@@ -79,11 +79,11 @@ void test_customer_cannot_unlock_account() {
         CHECK(saved->failedAttempts == 3);
     }
 
-    std::filesystem::remove(path);
 }
 
 void test_inactive_session_cannot_unlock_account() {
-    const std::string path = "test_account_unlock_inactive.dat";
+    bms::test::TempDir dir;
+    const std::string path = dir.file("credentials.dat");
     CredentialStore store(path);
 
     Credential customer = makeCredential("customer", Role::CUSTOMER, "1234");
@@ -97,11 +97,11 @@ void test_inactive_session_cannot_unlock_account() {
     CHECK(service.unlockAccount(session, "customer") == Status::UNAUTHORIZED);
 
     CHECK(store.find("customer")->locked);
-    std::filesystem::remove(path);
 }
 
 void test_missing_account_returns_not_found() {
-    const std::string path = "test_account_unlock_missing.dat";
+    bms::test::TempDir dir;
+    const std::string path = dir.file("credentials.dat");
     CredentialStore store(path);
     CHECK(store.save());
 
@@ -111,7 +111,6 @@ void test_missing_account_returns_not_found() {
     AccountUnlockService service(store);
     CHECK(service.unlockAccount(session, "missing") == Status::NOT_FOUND);
 
-    std::filesystem::remove(path);
 }
 
 } // namespace

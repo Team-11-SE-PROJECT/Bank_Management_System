@@ -21,12 +21,22 @@ add_executable(bms src/main.cpp)
 # 2. Automatically find all .cpp files in src/ (except main.cpp)
 file(GLOB_RECURSE BMS_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cpp")
 list(FILTER BMS_SOURCES EXCLUDE REGEX "/main\\.cpp$")
+list(FILTER BMS_SOURCES EXCLUDE REGEX "/web_main\\.cpp$")
 
 # 3. Create the core library
 if(BMS_SOURCES)
   add_library(bms_core STATIC ${BMS_SOURCES})
   target_include_directories(bms_core PUBLIC "${CMAKE_SOURCE_DIR}/include")
+  target_compile_definitions(
+    bms_core PRIVATE BMS_WEB_ROOT="${CMAKE_SOURCE_DIR}/web"
+  )
   target_link_libraries(bms PRIVATE bms_core)
+
+  add_executable(bms_web src/web_main.cpp)
+  target_link_libraries(bms_web PRIVATE bms_core)
+  if(WIN32)
+    target_link_libraries(bms_core PUBLIC ws2_32)
+  endif()
 endif()
 
 # 4. Enable testing and load the tests folder
