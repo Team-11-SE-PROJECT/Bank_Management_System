@@ -73,6 +73,13 @@ public:
         const std::string& sourceAccountNo,
         long long amountPaise
     ) const;
+
+    //Issue 34
+    TxnResult transfer(
+        const std::string& sourceAccountNo,
+        const std::string& destinationAccountNo,
+        long long amountPaise
+    );
 private:
     TxnResult finish(
         const domain::Account& updated,
