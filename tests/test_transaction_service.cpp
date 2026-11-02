@@ -986,6 +986,54 @@ static void test_transfer_both_legs_atomic_on_success() {
     CHECK_EQ(total, 150000);
 }
 
+// ------------------------------------------------------------
+// Issue #36: Escalate when transfer rollback itself fails
+// ------------------------------------------------------------
+
+static void test_transfer_escalates_when_reversal_also_fails() {
+    Fixture f;
+    addSecondAccount(f);
+
+    int clockCalls = 0;
+
+    TransactionService svc(
+        f.accounts, f.txns, f.config, f.audit,
+        [&f, &clockCalls] {
+            ++clockCalls;
+
+            // 2nd call: credit leg's finish() -> force it to fail.
+            // 3rd call: reversal's finish() -> leave it blocked too,
+            // so the reversal also fails (double failure).
+            if (clockCalls == 2) {
+                std::filesystem::create_directory(
+                    f.dir.file("accounts.dat.tmp")
+                );
+            }
+
+            return f.now;
+        }
+    );
+
+    const auto result = svc.transfer("BMS1001", "BMS1002", 30000);
+
+    CHECK(result.status == TxnStatus::STORAGE_FAILURE);
+
+    const std::string log =
+        bms::test::readFile(f.dir.file("audit.log"));
+
+    CHECK(
+        log.find("|TRANSFER_RECONCILIATION_REQUIRED|BMS1001|")
+        != std::string::npos
+    );
+    CHECK(
+        log.find("rolledBack=false") != std::string::npos
+    );
+
+    // Clean up the blocking path so later tests in this process
+    // (if any reuse the same dir) aren't affected.
+    std::filesystem::remove(f.dir.file("accounts.dat.tmp"));
+}
+
 int main() {
     test_deposit_updates_balance_in_memory_and_file();
     test_deposit_unknown_and_closed_account();
@@ -1043,5 +1091,7 @@ int main() {
     test_transfer_no_partial_effect_on_upfront_validation_failure();
     test_transfer_both_legs_atomic_on_success();
 
+    test_transfer_both_legs_atomic_on_success();
+    test_transfer_escalates_when_reversal_also_fails();
     return bms::test::summary("test_transaction_service");
 }
