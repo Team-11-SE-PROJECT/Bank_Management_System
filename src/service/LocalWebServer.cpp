@@ -76,6 +76,13 @@ std::string trim(const std::string& value) {
     return value.substr(first, last - first + 1);
 }
 
+std::string normalizeAccountNumber(const std::string& value) {
+    std::string accountNo = trim(value);
+    std::transform(accountNo.begin(), accountNo.end(), accountNo.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+    return accountNo;
+}
+
 std::string lower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(),
         [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
@@ -769,6 +776,9 @@ struct LocalWebServer::Impl {
             if (!roleMatches(*activeSession, infra::Role::CUSTOMER)) {
                 return error(403, "Customer access is required.");
             }
+            if (!accounts.load().isOk()) {
+                return error(500, "Could not load current account records.");
+            }
             const auto* source =
                 accounts.findByCustomer(activeSession->getUserId());
             if (source == nullptr) {
@@ -780,7 +790,14 @@ struct LocalWebServer::Impl {
                 return error(400, "Enter a valid positive amount (maximum two decimal places).");
             }
             const std::string destinationAccountNo =
-                get(request.form, "destinationAccountNo");
+                normalizeAccountNumber(get(request.form, "destinationAccountNo"));
+            if (destinationAccountNo.empty()) {
+                return error(400, "Enter the recipient's account number.");
+            }
+            if (accounts.find(destinationAccountNo) == nullptr) {
+                return error(404,
+                    "Recipient account not found. Enter the account number shown in the account details, not the customer ID.");
+            }
             const auto result = transactionService.transfer(
                 source->accountNo, destinationAccountNo, amountPaise
             );
@@ -926,15 +943,35 @@ struct LocalWebServer::Impl {
             if (!accounts.load().isOk()) {
                 return error(500, "Could not load account records.");
             }
+            const std::string accountNo =
+                normalizeAccountNumber(get(request.form, "accountNo"));
+            if (accountNo.empty()) {
+                return error(400, "Enter the account number to close.");
+            }
+            const auto* account = accounts.find(accountNo);
+            if (account == nullptr) {
+                return error(404,
+                    "Account not found. Enter the account number shown in customer search, not the customer ID.");
+            }
+            if (account->status != "ACTIVE") {
+                return error(400, "This account is already closed.");
+            }
+            if (account->balancePaise != 0) {
+                return error(400,
+                    "This account cannot be closed until its balance is zero. Current balance: " +
+                    std::to_string(account->balancePaise / 100) + "." +
+                    (account->balancePaise % 100 < 10 ? "0" : "") +
+                    std::to_string(account->balancePaise % 100) + " INR.");
+            }
             const auto status = accountClosureService.closeAccount(
-                *activeSession, get(request.form, "accountNo")
+                *activeSession, accountNo
             );
             if (status != domain::Status::OK) {
                 return error(status == domain::Status::NOT_FOUND ? 404 :
                     status == domain::Status::UNAUTHORIZED ? 403 :
                     status == domain::Status::STORAGE_FAILURE ? 500 : 400,
-                    status == domain::Status::INVALID_INPUT
-                        ? "Only active accounts with a zero balance can be closed."
+                    status == domain::Status::STORAGE_FAILURE
+                        ? "The account met the closure requirements, but the updated account file could not be saved."
                         : "Could not close this account.");
             }
             return response(200, "{\"ok\":true}");

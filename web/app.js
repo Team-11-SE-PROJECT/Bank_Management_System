@@ -283,10 +283,10 @@ function customerDashboard(data) {
           <div class="section-title"><div><div class="eyebrow">BETWEEN NORTHSTAR ACCOUNTS</div><h2>Transfer money</h2></div></div>
           <form id="transfer-form">
             <div class="hidden" data-message></div>
-            <div class="field"><label for="destination-account">Recipient account number</label><input id="destination-account" name="destinationAccountNo" autocomplete="off" placeholder="Enter destination account" required></div>
+            <div class="field"><label for="destination-account">Recipient account number</label><input id="destination-account" name="destinationAccountNo" autocomplete="off" placeholder="e.g. BMS000002" required></div>
             <div class="field"><label for="transfer-amount">Amount (INR)</label><input id="transfer-amount" name="amount" inputmode="decimal" placeholder="e.g. 500.00" required></div>
             <button class="button button-block" type="submit">Review &amp; transfer</button>
-            <p class="helper-copy">Transfers are recorded in the history of both accounts. Check the recipient account before continuing.</p>
+            <p class="helper-copy">Enter the recipient’s account number, not their customer ID. Transfers are recorded in both accounts’ history.</p>
           </form>
         </section>` : ""}
         <section class="card section-card">
@@ -382,7 +382,8 @@ async function adminDashboard(data) {
           <div class="section-title"><div><div class="eyebrow">ACCOUNT MANAGEMENT</div><h2>Close customer account</h2></div><span>Admin only</span></div>
           <form id="close-account-form">
             <div class="hidden" data-message></div>
-            <div class="field"><label for="close-account-number">Account number</label><input id="close-account-number" name="accountNo" autocomplete="off" placeholder="Enter account number" required></div>
+            <input type="hidden" name="confirmed" value="yes">
+            <div class="field"><label for="close-account-number">Account number</label><input id="close-account-number" name="accountNo" autocomplete="off" placeholder="e.g. BMS000002" required></div>
             <p class="helper-copy">Only active accounts with a zero balance can be closed. This action cannot be undone.</p>
             <button class="button button-danger button-block" type="submit">Close account</button>
           </form>
