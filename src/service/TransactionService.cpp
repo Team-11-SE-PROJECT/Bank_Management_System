@@ -268,6 +268,116 @@ TxnStatus TransactionService::validateTransferAmount(
     return TxnStatus::OK;
 }
 
+//Issue 34
+TxnResult TransactionService::transfer(
+    const std::string& sourceAccountNo,
+    const std::string& destinationAccountNo,
+    long long amountPaise
+) {
+    const TxnStatus accountsStatus =
+        validateTransferAccounts(sourceAccountNo, destinationAccountNo);
+
+    if (accountsStatus != TxnStatus::OK) {
+        return fail(
+            accountsStatus, "TRANSFER", sourceAccountNo, amountPaise
+        );
+    }
+
+    const TxnStatus amountStatus =
+        validateTransferAmount(sourceAccountNo, amountPaise);
+
+    if (amountStatus != TxnStatus::OK) {
+        return fail(
+            amountStatus, "TRANSFER", sourceAccountNo, amountPaise
+        );
+    }
+
+    // --- Leg 1: debit the source account ---
+    const Account* source = accounts_.find(sourceAccountNo);
+
+    Account debited = *source;
+    debited.balancePaise -= amountPaise;
+
+    domain::Transaction debitTxn;
+    debitTxn.type = TxnType::WITHDRAWAL;
+    debitTxn.accountNo = sourceAccountNo;
+    debitTxn.counterparty = destinationAccountNo;
+    debitTxn.amountPaise = amountPaise;
+
+    const TxnResult debitResult = finish(debited, debitTxn);
+
+    if (debitResult.status != TxnStatus::OK) {
+        return debitResult;
+    }
+
+    // --- Leg 2: credit the destination account ---
+    const Account* destination = accounts_.find(destinationAccountNo);
+
+    if (!destination) {
+        return fail(
+            TxnStatus::NOT_FOUND, "TRANSFER",
+            destinationAccountNo, amountPaise
+        );
+    }
+
+    Account credited = *destination;
+    credited.balancePaise += amountPaise;
+
+    domain::Transaction creditTxn;
+    creditTxn.type = TxnType::DEPOSIT;
+    creditTxn.accountNo = destinationAccountNo;
+    creditTxn.counterparty = sourceAccountNo;
+    creditTxn.amountPaise = amountPaise;
+
+    const TxnResult creditResult = finish(credited, creditTxn);
+
+    if (creditResult.status != TxnStatus::OK) {
+        // Credit failed after debit succeeded (e.g. storage
+        // failure) — reverse the debit so funds aren't lost.
+        const Account* currentSource =
+            accounts_.find(sourceAccountNo);
+
+        if (currentSource) {
+            Account restored = *currentSource;
+            restored.balancePaise += amountPaise;
+
+            domain::Transaction reversalTxn;
+            reversalTxn.type = TxnType::DEPOSIT;
+            reversalTxn.accountNo = sourceAccountNo;
+            reversalTxn.counterparty = "TRANSFER_REVERSAL";
+            reversalTxn.amountPaise = amountPaise;
+
+            finish(restored, reversalTxn);
+        }
+
+        audit_.log(
+            "TRANSFER", sourceAccountNo,
+            "FAILED_" + std::string(toString(creditResult.status)),
+            "destination=" + destinationAccountNo +
+                " amountPaise=" + std::to_string(amountPaise) +
+                " rolledBack=true"
+        );
+
+        TxnResult result;
+        result.status = creditResult.status;
+        return result;
+    }
+
+    audit_.log(
+        "TRANSFER", sourceAccountNo, "SUCCESS",
+        "destination=" + destinationAccountNo +
+            " amountPaise=" + std::to_string(amountPaise) +
+            " debitTxn=" + debitResult.txnId +
+            " creditTxn=" + creditResult.txnId
+    );
+
+    TxnResult result;
+    result.status = TxnStatus::OK;
+    result.txnId = debitResult.txnId;
+    result.newBalancePaise = debitResult.newBalancePaise;
+    return result;
+}
+
 TxnResult TransactionService::finish(
     const Account& updated,
     domain::Transaction txn

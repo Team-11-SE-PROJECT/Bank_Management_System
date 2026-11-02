@@ -766,6 +766,132 @@ static void test_transfer_amount_validation_changes_no_data_and_audits_failures(
     );
 }
 
+// ------------------------------------------------------------
+// Issue #34: Fund transfer between accounts
+// ------------------------------------------------------------
+
+static void test_transfer_moves_funds_between_accounts() {
+    Fixture f;
+    addSecondAccount(f);
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 30000);
+
+    CHECK(result.status == TxnStatus::OK);
+    CHECK_EQ(f.balance(), 70000);
+
+    const auto destBalance = f.svc.getBalance("BMS1002");
+    CHECK_EQ(destBalance.newBalancePaise, 80000);
+}
+
+static void test_transfer_rejects_invalid_accounts() {
+    Fixture f;
+    addSecondAccount(f);
+
+    CHECK(
+        f.svc.transfer("BMS1001", "BMS1001", 1000).status
+        == TxnStatus::INVALID_INPUT
+    );
+    CHECK(
+        f.svc.transfer("NOPE", "BMS1002", 1000).status
+        == TxnStatus::NOT_FOUND
+    );
+    CHECK_EQ(f.balance(), 100000);
+}
+
+static void test_transfer_rejects_insufficient_funds() {
+    Fixture f;
+    addSecondAccount(f);
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 100001);
+
+    CHECK(result.status == TxnStatus::INSUFFICIENT_FUNDS);
+    CHECK_EQ(f.balance(), 100000);
+
+    const auto destBalance = f.svc.getBalance("BMS1002");
+    CHECK_EQ(destBalance.newBalancePaise, 50000);
+}
+
+static void test_transfer_exact_balance_succeeds() {
+    Fixture f;
+    addSecondAccount(f);
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 100000);
+
+    CHECK(result.status == TxnStatus::OK);
+    CHECK_EQ(f.balance(), 0);
+
+    const auto destBalance = f.svc.getBalance("BMS1002");
+    CHECK_EQ(destBalance.newBalancePaise, 150000);
+}
+
+static void test_transfer_rejects_closed_destination() {
+    Fixture f;
+    addSecondAccount(f);
+
+    f.accounts.find("BMS1002")->status = "CLOSED";
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 1000);
+
+    CHECK(result.status == TxnStatus::ACCOUNT_CLOSED);
+    CHECK_EQ(f.balance(), 100000);
+}
+
+static void test_transfer_records_both_legs_in_history() {
+    Fixture f;
+    addSecondAccount(f);
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 10000);
+
+    CHECK(result.status == TxnStatus::OK);
+
+    const auto& all = f.txns.all();
+
+    // Each leg writes PENDING + COMMITTED, so two legs = 4 records.
+    CHECK_EQ(all.size(), 4u);
+    CHECK(f.txns.pending().empty());
+}
+
+static void test_transfer_survives_repository_reload() {
+    Fixture f;
+    addSecondAccount(f);
+
+    CHECK(
+        f.svc.transfer("BMS1001", "BMS1002", 20000).status
+        == TxnStatus::OK
+    );
+
+    CHECK_EQ(f.balanceOnDisk(), 80000);
+
+    AccountRepository reloaded(f.dir.file("accounts.dat"));
+    CHECK(reloaded.load() == LoadStatus::OK);
+
+    const auto* dest = reloaded.find("BMS1002");
+    CHECK(dest != nullptr);
+    CHECK_EQ(dest->balancePaise, 70000);
+}
+
+static void test_transfer_audit_log_records_success() {
+    Fixture f;
+    addSecondAccount(f);
+
+    CHECK(
+        f.svc.transfer("BMS1001", "BMS1002", 5000).status
+        == TxnStatus::OK
+    );
+
+    const std::string log =
+        bms::test::readFile(f.dir.file("audit.log"));
+
+    CHECK(
+        log.find("|TRANSFER|BMS1001|SUCCESS|") != std::string::npos
+    );
+}
+
 int main() {
     test_deposit_updates_balance_in_memory_and_file();
     test_deposit_unknown_and_closed_account();
@@ -809,6 +935,14 @@ int main() {
     test_transfer_amount_validation_rejects_unknown_account();
     test_transfer_amount_validation_rejects_closed_account();
     test_transfer_amount_validation_changes_no_data_and_audits_failures();
-    
+
+    test_transfer_moves_funds_between_accounts();
+    test_transfer_rejects_invalid_accounts();
+    test_transfer_rejects_insufficient_funds();
+    test_transfer_exact_balance_succeeds();
+    test_transfer_rejects_closed_destination();
+    test_transfer_records_both_legs_in_history();
+    test_transfer_survives_repository_reload();
+    test_transfer_audit_log_records_success();
     return bms::test::summary("test_transaction_service");
 }
