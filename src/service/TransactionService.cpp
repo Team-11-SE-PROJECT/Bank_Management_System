@@ -232,6 +232,42 @@ TxnStatus TransactionService::validateTransferAccounts(
     return TxnStatus::OK;
 }
 
+//Issue 33
+TxnStatus TransactionService::validateTransferAmount(
+    const std::string& sourceAccountNo,
+    long long amountPaise
+) const {
+    const auto reject = [&](TxnStatus status,
+                            const std::string& reason) {
+        audit_.log(
+            "TRANSFER_VALIDATION",
+            sourceAccountNo,
+            std::string("FAILED_") + toString(status),
+            reason + " amountPaise=" + std::to_string(amountPaise)
+        );
+        return status;
+    };
+
+    if (amountPaise <= 0 || amountPaise > infra::kMaxAmountPaise) {
+        return reject(TxnStatus::INVALID_INPUT, "INVALID_AMOUNT");
+    }
+
+    const Account* source = accounts_.find(sourceAccountNo);
+    if (!source) {
+        return reject(TxnStatus::NOT_FOUND, "SOURCE_NOT_FOUND");
+    }
+
+    if (source->status == "CLOSED") {
+        return reject(TxnStatus::ACCOUNT_CLOSED, "SOURCE_CLOSED");
+    }
+
+    if (amountPaise > source->balancePaise) {
+        return reject(TxnStatus::INSUFFICIENT_FUNDS, "INSUFFICIENT_FUNDS");
+    }
+
+    return TxnStatus::OK;
+}
+
 TxnResult TransactionService::finish(
     const Account& updated,
     domain::Transaction txn
