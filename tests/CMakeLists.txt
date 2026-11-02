@@ -119,3 +119,8 @@ add_executable(test_audit_log_review test_audit_log_review.cpp)
 target_link_libraries(test_audit_log_review PRIVATE bms_core)
 target_include_directories(test_audit_log_review PRIVATE "${CMAKE_SOURCE_DIR}/tests")
 add_test(NAME test_audit_log_review COMMAND test_audit_log_review)
+
+add_executable(test_transaction_history test_transaction_history.cpp)
+target_link_libraries(test_transaction_history PRIVATE bms_core)
+target_include_directories(test_transaction_history PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_transaction_history COMMAND test_transaction_history)

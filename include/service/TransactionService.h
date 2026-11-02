@@ -2,7 +2,7 @@
 
 #include <functional>
 #include <string>
-
+#include "domain/Transaction.h"
 #include "infra/AccountRepository.h"
 #include "infra/AuditLogger.h"
 #include "infra/Config.h"
@@ -28,6 +28,11 @@ struct TxnResult {
     TxnStatus status = TxnStatus::OK;
     std::string txnId;
     long long newBalancePaise = 0;
+};
+
+struct HistoryResult {
+    TxnStatus status = TxnStatus::OK;
+    std::vector<domain::Transaction> records;   // newest first
 };
 
 class TransactionService {
@@ -80,6 +85,13 @@ public:
         const std::string& destinationAccountNo,
         long long amountPaise
     );
+    // Committed transactions for one account, newest first.
+    // NOT_FOUND if the account does not exist.
+    HistoryResult getHistory(const std::string& accountNo) const;
+
+    // Renders records as a text table for the console menu.
+    static std::string formatHistory(
+        const std::vector<domain::Transaction>& records);
 private:
     TxnResult finish(
         const domain::Account& updated,
