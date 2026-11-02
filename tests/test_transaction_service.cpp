@@ -579,6 +579,102 @@ static void test_banking_operations_survive_repository_reload() {
     }
 }
 
+// ------------------------------------------------------------
+// Issue #32: Validate source and destination accounts
+// ------------------------------------------------------------
+
+static void addSecondAccount(Fixture& f) {
+    Account other;
+    other.accountNo = "BMS1002";
+    other.customerId = "cust1002";
+    other.balancePaise = 50000;
+    f.accounts.upsert(other);
+    f.accounts.save();
+}
+
+static void test_transfer_validation_accepts_two_active_accounts() {
+    Fixture f;
+    addSecondAccount(f);
+
+    CHECK(
+        f.svc.validateTransferAccounts("BMS1001", "BMS1002")
+        == TxnStatus::OK
+    );
+}
+
+static void test_transfer_validation_rejects_unknown_accounts() {
+    Fixture f;
+    addSecondAccount(f);
+
+    CHECK(
+        f.svc.validateTransferAccounts("NOPE", "BMS1002")
+        == TxnStatus::NOT_FOUND
+    );
+    CHECK(
+        f.svc.validateTransferAccounts("BMS1001", "NOPE")
+        == TxnStatus::NOT_FOUND
+    );
+}
+
+static void test_transfer_validation_rejects_same_account() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAccounts("BMS1001", "BMS1001")
+        == TxnStatus::INVALID_INPUT
+    );
+}
+
+static void test_transfer_validation_rejects_empty_account_numbers() {
+    Fixture f;
+    addSecondAccount(f);
+
+    CHECK(
+        f.svc.validateTransferAccounts("", "BMS1002")
+        == TxnStatus::INVALID_INPUT
+    );
+    CHECK(
+        f.svc.validateTransferAccounts("BMS1001", "")
+        == TxnStatus::INVALID_INPUT
+    );
+}
+
+static void test_transfer_validation_rejects_closed_accounts() {
+    Fixture f;
+    addSecondAccount(f);
+
+    f.accounts.find("BMS1002")->status = "CLOSED";
+    CHECK(
+        f.svc.validateTransferAccounts("BMS1001", "BMS1002")
+        == TxnStatus::ACCOUNT_CLOSED
+    );
+
+    f.accounts.find("BMS1002")->status = "ACTIVE";
+    f.accounts.find("BMS1001")->status = "CLOSED";
+    CHECK(
+        f.svc.validateTransferAccounts("BMS1001", "BMS1002")
+        == TxnStatus::ACCOUNT_CLOSED
+    );
+}
+
+static void test_transfer_validation_changes_no_data_and_audits_failures() {
+    Fixture f;
+    addSecondAccount(f);
+
+    f.svc.validateTransferAccounts("BMS1001", "BMS1001");
+
+    CHECK_EQ(f.balance(), 100000);
+    CHECK_EQ(f.txns.all().size(), 0u);
+
+    const std::string log =
+        bms::test::readFile(f.dir.file("audit.log"));
+
+    CHECK(
+        log.find("|TRANSFER_VALIDATION|BMS1001|FAILED_INVALID_INPUT|")
+        != std::string::npos
+    );
+}
+
 int main() {
     test_deposit_updates_balance_in_memory_and_file();
     test_deposit_unknown_and_closed_account();
@@ -606,6 +702,13 @@ int main() {
     test_storage_failure_rolls_back();
     test_audit_log_records_success_and_failure();
     test_banking_operations_survive_repository_reload();
+
+    test_transfer_validation_accepts_two_active_accounts();
+    test_transfer_validation_rejects_unknown_accounts();
+    test_transfer_validation_rejects_same_account();
+    test_transfer_validation_rejects_empty_account_numbers();
+    test_transfer_validation_rejects_closed_accounts();
+    test_transfer_validation_changes_no_data_and_audits_failures();
 
     return bms::test::summary("test_transaction_service");
 }

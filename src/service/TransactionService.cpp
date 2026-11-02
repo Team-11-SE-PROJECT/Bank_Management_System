@@ -187,6 +187,50 @@ TxnResult TransactionService::getBalance(
     result.newBalancePaise = account->balancePaise;
     return result;
 }
+//Issue 32
+TxnStatus TransactionService::validateTransferAccounts(
+    const std::string& sourceAccountNo,
+    const std::string& destinationAccountNo
+) const {
+    const auto reject = [&](TxnStatus status,
+                            const std::string& reason) {
+        audit_.log(
+            "TRANSFER_VALIDATION",
+            sourceAccountNo,
+            std::string("FAILED_") + toString(status),
+            reason + " destination=" + destinationAccountNo
+        );
+        return status;
+    };
+
+    if (sourceAccountNo.empty() || destinationAccountNo.empty()) {
+        return reject(TxnStatus::INVALID_INPUT, "EMPTY_ACCOUNT_NO");
+    }
+
+    if (sourceAccountNo == destinationAccountNo) {
+        return reject(TxnStatus::INVALID_INPUT, "SAME_ACCOUNT");
+    }
+
+    const Account* source = accounts_.find(sourceAccountNo);
+    if (!source) {
+        return reject(TxnStatus::NOT_FOUND, "SOURCE_NOT_FOUND");
+    }
+
+    const Account* destination = accounts_.find(destinationAccountNo);
+    if (!destination) {
+        return reject(TxnStatus::NOT_FOUND, "DESTINATION_NOT_FOUND");
+    }
+
+    if (source->status == "CLOSED") {
+        return reject(TxnStatus::ACCOUNT_CLOSED, "SOURCE_CLOSED");
+    }
+
+    if (destination->status == "CLOSED") {
+        return reject(TxnStatus::ACCOUNT_CLOSED, "DESTINATION_CLOSED");
+    }
+
+    return TxnStatus::OK;
+}
 
 TxnResult TransactionService::finish(
     const Account& updated,
