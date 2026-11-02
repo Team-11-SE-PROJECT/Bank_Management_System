@@ -62,6 +62,12 @@ public:
         const std::string& accountNo
     ) const;
 
+    //Issue 32
+    TxnStatus validateTransferAccounts(
+        const std::string& sourceAccountNo,
+        const std::string& destinationAccountNo
+    ) const;
+
 private:
     TxnResult finish(
         const domain::Account& updated,
