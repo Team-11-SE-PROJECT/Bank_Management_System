@@ -9,6 +9,7 @@
 #include "infra/Journal.h"
 #include "infra/TimeUtil.h"
 #include "infra/TransactionRepository.h"
+#include <optional>
 
 namespace bms::service {
 
@@ -87,7 +88,11 @@ public:
     );
     // Committed transactions for one account, newest first.
     // NOT_FOUND if the account does not exist.
-    HistoryResult getHistory(const std::string& accountNo) const;
+    HistoryResult getHistory(
+        const std::string& accountNo,
+        const std::string& fromDate = "",
+        const std::string& toDate = "",
+        std::optional<domain::TxnType> type = std::nullopt) const;
 
     // Renders records as a text table for the console menu.
     static std::string formatHistory(
