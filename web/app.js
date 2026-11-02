@@ -379,6 +379,15 @@ async function adminDashboard(data) {
           </form>
         </section>
         <section class="card section-card">
+          <div class="section-title"><div><div class="eyebrow">ACCOUNT MANAGEMENT</div><h2>Close customer account</h2></div><span>Admin only</span></div>
+          <form id="close-account-form">
+            <div class="hidden" data-message></div>
+            <div class="field"><label for="close-account-number">Account number</label><input id="close-account-number" name="accountNo" autocomplete="off" placeholder="Enter account number" required></div>
+            <p class="helper-copy">Only active accounts with a zero balance can be closed. This action cannot be undone.</p>
+            <button class="button button-danger button-block" type="submit">Close account</button>
+          </form>
+        </section>
+        <section class="card section-card">
           <div class="section-title"><div><div class="eyebrow">CUSTOMER SERVICES</div><h2>Find and manage customers</h2></div></div>
           <form id="customer-search-form">
             <div class="hidden" data-message></div>
@@ -430,6 +439,21 @@ async function adminDashboard(data) {
   });
   bindForm(document.querySelector("#unlock-form"), "/api/admin/unlock");
   bindForm(document.querySelector("#pin-form"), "/api/change-pin");
+  bindForm(
+    document.querySelector("#close-account-form"),
+    "/api/admin/close-account",
+    async () => {
+      showMessage(
+        document.querySelector("#close-account-form"),
+        "Account closed successfully.",
+        true
+      );
+      await loadAdminStatus();
+    },
+    (values) => window.confirm(
+      `Close account ${values.accountNo}? Only an active account with a zero balance can be closed. This cannot be undone.`
+    )
+  );
   bindCustomerSearch();
   bindAuditReview();
   await loadAdminStatus();
