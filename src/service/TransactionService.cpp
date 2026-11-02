@@ -1,6 +1,9 @@
 #include "service/TransactionService.h"
 
+#include <iomanip>
 #include <limits>
+#include <map>
+#include <sstream>
 #include <utility>
 
 #include "infra/InputValidator.h"
@@ -10,6 +13,24 @@ namespace bms::service {
 using domain::Account;
 using domain::TxnState;
 using domain::TxnType;
+
+namespace {
+
+// 125050 -> "1250.50"
+std::string formatPaise(long long paise) {
+    const bool negative = paise < 0;
+    const unsigned long long v = negative
+        ? 0ULL - static_cast<unsigned long long>(paise)
+        : static_cast<unsigned long long>(paise);
+
+    std::ostringstream out;
+    if (negative) out << '-';
+    out << (v / 100) << '.'
+        << std::setw(2) << std::setfill('0') << (v % 100);
+    return out.str();
+}
+
+} // namespace
 
 const char* toString(TxnStatus status) {
     switch (status) {
@@ -397,6 +418,74 @@ TxnResult TransactionService::transfer(
     result.txnId = debitResult.txnId;
     result.newBalancePaise = debitResult.newBalancePaise;
     return result;
+}
+
+HistoryResult TransactionService::getHistory(
+    const std::string& accountNo
+) const {
+    HistoryResult result;
+
+    if (!accounts_.find(accountNo)) {
+        result.status = TxnStatus::NOT_FOUND;
+        return result;
+    }
+
+    // Every transaction is written to transactions.dat more than once
+    // (PENDING, then COMMITTED or ABORTED). Only the latest row per
+    // txnId describes its real outcome.
+    const auto& all = txns_.all();
+    std::map<std::string, std::size_t> latest;
+    for (std::size_t i = 0; i < all.size(); ++i) {
+        latest[all[i].txnId] = i;
+    }
+
+    // Newest first.
+    for (std::size_t i = all.size(); i-- > 0;) {
+        const auto& t = all[i];
+
+        if (latest[t.txnId] != i) continue;
+        if (t.state != TxnState::COMMITTED) continue;
+        if (t.accountNo != accountNo) continue;
+
+        result.records.push_back(t);
+    }
+
+    result.status = TxnStatus::OK;
+    return result;
+}
+
+std::string TransactionService::formatHistory(
+    const std::vector<domain::Transaction>& records
+) {
+    if (records.empty()) {
+        return "No transactions found.\n";
+    }
+
+    std::ostringstream out;
+
+    out << std::left
+        << std::setw(11) << "TXN ID"
+        << std::setw(21) << "DATE/TIME"
+        << std::setw(12) << "TYPE"
+        << std::setw(14) << "COUNTERPARTY"
+        << std::right
+        << std::setw(14) << "AMOUNT"
+        << std::setw(16) << "BALANCE"
+        << '\n';
+
+    for (const auto& t : records) {
+        out << std::left
+            << std::setw(11) << t.txnId
+            << std::setw(21) << t.timestamp
+            << std::setw(12) << domain::toString(t.type)
+            << std::setw(14) << t.counterparty
+            << std::right
+            << std::setw(14) << formatPaise(t.amountPaise)
+            << std::setw(16) << formatPaise(t.balanceAfterPaise)
+            << '\n';
+    }
+
+    return out.str();
 }
 
 TxnResult TransactionService::finish(
