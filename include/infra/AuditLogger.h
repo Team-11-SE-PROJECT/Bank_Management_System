@@ -7,6 +7,12 @@ class AuditLogger {
 public:
     explicit AuditLogger(std::string path);
 
+    bool logError(
+        const std::string& event,
+        const std::string& severity,
+        const std::string& details = {}
+    ) const;
+
     bool log(
         const std::string& event,
         const std::string& account,

@@ -1,3 +1,4 @@
+
 #include "infra/CustomerAccountStore.h"
 
 #include <filesystem>
@@ -268,6 +269,39 @@ bool CustomerAccountStore::addCustomer(
     }
 
     return true;
+}
+
+// Updates an existing customer's personal information.
+// The customer ID remains unchanged and the original data is restored
+// if saving the updated information fails.
+bool CustomerAccountStore::updateCustomer(
+    const domain::Customer& customer
+) {
+    std::string line;
+    std::string err;
+
+    if (!format::serializeCustomer(customer, line, err)) {
+        return false;
+    }
+
+    for (auto& existingCustomer : customers_) {
+        if (existingCustomer.customerId == customer.customerId) {
+            domain::Customer previousCustomer = existingCustomer;
+
+            existingCustomer.name = customer.name;
+            existingCustomer.phone = customer.phone;
+            existingCustomer.address = customer.address;
+
+            if (!saveCustomers()) {
+                existingCustomer = previousCustomer;
+                return false;
+            }
+
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool CustomerAccountStore::addAccount(

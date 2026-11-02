@@ -187,6 +187,217 @@ TxnResult TransactionService::getBalance(
     result.newBalancePaise = account->balancePaise;
     return result;
 }
+//Issue 32
+TxnStatus TransactionService::validateTransferAccounts(
+    const std::string& sourceAccountNo,
+    const std::string& destinationAccountNo
+) const {
+    const auto reject = [&](TxnStatus status,
+                            const std::string& reason) {
+        audit_.log(
+            "TRANSFER_VALIDATION",
+            sourceAccountNo,
+            std::string("FAILED_") + toString(status),
+            reason + " destination=" + destinationAccountNo
+        );
+        return status;
+    };
+
+    if (sourceAccountNo.empty() || destinationAccountNo.empty()) {
+        return reject(TxnStatus::INVALID_INPUT, "EMPTY_ACCOUNT_NO");
+    }
+
+    if (sourceAccountNo == destinationAccountNo) {
+        return reject(TxnStatus::INVALID_INPUT, "SAME_ACCOUNT");
+    }
+
+    const Account* source = accounts_.find(sourceAccountNo);
+    if (!source) {
+        return reject(TxnStatus::NOT_FOUND, "SOURCE_NOT_FOUND");
+    }
+
+    const Account* destination = accounts_.find(destinationAccountNo);
+    if (!destination) {
+        return reject(TxnStatus::NOT_FOUND, "DESTINATION_NOT_FOUND");
+    }
+
+    if (source->status == "CLOSED") {
+        return reject(TxnStatus::ACCOUNT_CLOSED, "SOURCE_CLOSED");
+    }
+
+    if (destination->status == "CLOSED") {
+        return reject(TxnStatus::ACCOUNT_CLOSED, "DESTINATION_CLOSED");
+    }
+
+    return TxnStatus::OK;
+}
+
+//Issue 33
+TxnStatus TransactionService::validateTransferAmount(
+    const std::string& sourceAccountNo,
+    long long amountPaise
+) const {
+    const auto reject = [&](TxnStatus status,
+                            const std::string& reason) {
+        audit_.log(
+            "TRANSFER_VALIDATION",
+            sourceAccountNo,
+            std::string("FAILED_") + toString(status),
+            reason + " amountPaise=" + std::to_string(amountPaise)
+        );
+        return status;
+    };
+
+    if (amountPaise <= 0 || amountPaise > infra::kMaxAmountPaise) {
+        return reject(TxnStatus::INVALID_INPUT, "INVALID_AMOUNT");
+    }
+
+    const Account* source = accounts_.find(sourceAccountNo);
+    if (!source) {
+        return reject(TxnStatus::NOT_FOUND, "SOURCE_NOT_FOUND");
+    }
+
+    if (source->status == "CLOSED") {
+        return reject(TxnStatus::ACCOUNT_CLOSED, "SOURCE_CLOSED");
+    }
+
+    if (amountPaise > source->balancePaise) {
+        return reject(TxnStatus::INSUFFICIENT_FUNDS, "INSUFFICIENT_FUNDS");
+    }
+
+    return TxnStatus::OK;
+}
+
+//Issue 34
+TxnResult TransactionService::transfer(
+    const std::string& sourceAccountNo,
+    const std::string& destinationAccountNo,
+    long long amountPaise
+) {
+    const TxnStatus accountsStatus =
+        validateTransferAccounts(sourceAccountNo, destinationAccountNo);
+
+    if (accountsStatus != TxnStatus::OK) {
+        return fail(
+            accountsStatus, "TRANSFER", sourceAccountNo, amountPaise
+        );
+    }
+
+    const TxnStatus amountStatus =
+        validateTransferAmount(sourceAccountNo, amountPaise);
+
+    if (amountStatus != TxnStatus::OK) {
+        return fail(
+            amountStatus, "TRANSFER", sourceAccountNo, amountPaise
+        );
+    }
+
+    // --- Leg 1: debit the source account ---
+    const Account* source = accounts_.find(sourceAccountNo);
+
+    Account debited = *source;
+    debited.balancePaise -= amountPaise;
+
+    domain::Transaction debitTxn;
+    debitTxn.type = TxnType::WITHDRAWAL;
+    debitTxn.accountNo = sourceAccountNo;
+    debitTxn.counterparty = destinationAccountNo;
+    debitTxn.amountPaise = amountPaise;
+
+    const TxnResult debitResult = finish(debited, debitTxn);
+
+    if (debitResult.status != TxnStatus::OK) {
+        return debitResult;
+    }
+
+    // --- Leg 2: credit the destination account ---
+    const Account* destination = accounts_.find(destinationAccountNo);
+
+    if (!destination) {
+        return fail(
+            TxnStatus::NOT_FOUND, "TRANSFER",
+            destinationAccountNo, amountPaise
+        );
+    }
+
+    Account credited = *destination;
+    credited.balancePaise += amountPaise;
+
+    domain::Transaction creditTxn;
+    creditTxn.type = TxnType::DEPOSIT;
+    creditTxn.accountNo = destinationAccountNo;
+    creditTxn.counterparty = sourceAccountNo;
+    creditTxn.amountPaise = amountPaise;
+
+    const TxnResult creditResult = finish(credited, creditTxn);
+
+    if (creditResult.status != TxnStatus::OK) {
+        // Credit failed after debit succeeded (e.g. storage
+        // failure) — reverse the debit so funds aren't lost.
+        const Account* currentSource =
+            accounts_.find(sourceAccountNo);
+
+        bool reversalSucceeded = false;
+
+        if (currentSource) {
+            Account restored = *currentSource;
+            restored.balancePaise += amountPaise;
+
+            domain::Transaction reversalTxn;
+            reversalTxn.type = TxnType::DEPOSIT;
+            reversalTxn.accountNo = sourceAccountNo;
+            reversalTxn.counterparty = "TRANSFER_REVERSAL";
+            reversalTxn.amountPaise = amountPaise;
+
+            const TxnResult reversalResult =
+                finish(restored, reversalTxn);
+            reversalSucceeded =
+                reversalResult.status == TxnStatus::OK;
+        }
+
+        if (reversalSucceeded) {
+            audit_.log(
+                "TRANSFER", sourceAccountNo,
+                "FAILED_" +
+                    std::string(toString(creditResult.status)),
+                "destination=" + destinationAccountNo +
+                    " amountPaise=" + std::to_string(amountPaise) +
+                    " rolledBack=true"
+            );
+        } else {
+            // The reversal itself failed: the source is left
+            // debited with no matching credit anywhere. This
+            // cannot be auto-healed further and needs a human.
+            audit_.log(
+                "TRANSFER_RECONCILIATION_REQUIRED",
+                sourceAccountNo,
+                "FAILED_" +
+                    std::string(toString(creditResult.status)),
+                "destination=" + destinationAccountNo +
+                    " amountPaise=" + std::to_string(amountPaise) +
+                    " rolledBack=false"
+            );
+        }
+
+        TxnResult result;
+        result.status = creditResult.status;
+        return result;
+    }
+
+    audit_.log(
+        "TRANSFER", sourceAccountNo, "SUCCESS",
+        "destination=" + destinationAccountNo +
+            " amountPaise=" + std::to_string(amountPaise) +
+            " debitTxn=" + debitResult.txnId +
+            " creditTxn=" + creditResult.txnId
+    );
+
+    TxnResult result;
+    result.status = TxnStatus::OK;
+    result.txnId = debitResult.txnId;
+    result.newBalancePaise = debitResult.newBalancePaise;
+    return result;
+}
 
 TxnResult TransactionService::finish(
     const Account& updated,

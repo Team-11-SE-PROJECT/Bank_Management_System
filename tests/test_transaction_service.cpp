@@ -579,6 +579,461 @@ static void test_banking_operations_survive_repository_reload() {
     }
 }
 
+// ------------------------------------------------------------
+// Issue #32: Validate source and destination accounts
+// ------------------------------------------------------------
+
+static void addSecondAccount(Fixture& f) {
+    Account other;
+    other.accountNo = "BMS1002";
+    other.customerId = "cust1002";
+    other.balancePaise = 50000;
+    f.accounts.upsert(other);
+    f.accounts.save();
+}
+
+static void test_transfer_validation_accepts_two_active_accounts() {
+    Fixture f;
+    addSecondAccount(f);
+
+    CHECK(
+        f.svc.validateTransferAccounts("BMS1001", "BMS1002")
+        == TxnStatus::OK
+    );
+}
+
+static void test_transfer_validation_rejects_unknown_accounts() {
+    Fixture f;
+    addSecondAccount(f);
+
+    CHECK(
+        f.svc.validateTransferAccounts("NOPE", "BMS1002")
+        == TxnStatus::NOT_FOUND
+    );
+    CHECK(
+        f.svc.validateTransferAccounts("BMS1001", "NOPE")
+        == TxnStatus::NOT_FOUND
+    );
+}
+
+static void test_transfer_validation_rejects_same_account() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAccounts("BMS1001", "BMS1001")
+        == TxnStatus::INVALID_INPUT
+    );
+}
+
+static void test_transfer_validation_rejects_empty_account_numbers() {
+    Fixture f;
+    addSecondAccount(f);
+
+    CHECK(
+        f.svc.validateTransferAccounts("", "BMS1002")
+        == TxnStatus::INVALID_INPUT
+    );
+    CHECK(
+        f.svc.validateTransferAccounts("BMS1001", "")
+        == TxnStatus::INVALID_INPUT
+    );
+}
+
+static void test_transfer_validation_rejects_closed_accounts() {
+    Fixture f;
+    addSecondAccount(f);
+
+    f.accounts.find("BMS1002")->status = "CLOSED";
+    CHECK(
+        f.svc.validateTransferAccounts("BMS1001", "BMS1002")
+        == TxnStatus::ACCOUNT_CLOSED
+    );
+
+    f.accounts.find("BMS1002")->status = "ACTIVE";
+    f.accounts.find("BMS1001")->status = "CLOSED";
+    CHECK(
+        f.svc.validateTransferAccounts("BMS1001", "BMS1002")
+        == TxnStatus::ACCOUNT_CLOSED
+    );
+}
+
+static void test_transfer_validation_changes_no_data_and_audits_failures() {
+    Fixture f;
+    addSecondAccount(f);
+
+    f.svc.validateTransferAccounts("BMS1001", "BMS1001");
+
+    CHECK_EQ(f.balance(), 100000);
+    CHECK_EQ(f.txns.all().size(), 0u);
+
+    const std::string log =
+        bms::test::readFile(f.dir.file("audit.log"));
+
+    CHECK(
+        log.find("|TRANSFER_VALIDATION|BMS1001|FAILED_INVALID_INPUT|")
+        != std::string::npos
+    );
+}
+
+// ------------------------------------------------------------
+// Issue #33: Validate transfer amount and available funds
+// ------------------------------------------------------------
+
+static void test_transfer_amount_validation_accepts_valid_amount() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAmount("BMS1001", 50000)
+        == TxnStatus::OK
+    );
+}
+
+static void test_transfer_amount_validation_accepts_exact_balance() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAmount("BMS1001", 100000)
+        == TxnStatus::OK
+    );
+}
+
+static void test_transfer_amount_validation_rejects_zero_and_negative() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAmount("BMS1001", 0)
+        == TxnStatus::INVALID_INPUT
+    );
+    CHECK(
+        f.svc.validateTransferAmount("BMS1001", -1)
+        == TxnStatus::INVALID_INPUT
+    );
+}
+
+static void test_transfer_amount_validation_rejects_over_max() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAmount(
+            "BMS1001", kMaxAmountPaise + 1
+        ) == TxnStatus::INVALID_INPUT
+    );
+}
+
+static void test_transfer_amount_validation_rejects_insufficient_funds() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAmount("BMS1001", 100001)
+        == TxnStatus::INSUFFICIENT_FUNDS
+    );
+}
+
+static void test_transfer_amount_validation_rejects_unknown_account() {
+    Fixture f;
+
+    CHECK(
+        f.svc.validateTransferAmount("NOPE", 100)
+        == TxnStatus::NOT_FOUND
+    );
+}
+
+static void test_transfer_amount_validation_rejects_closed_account() {
+    Fixture f;
+
+    f.accounts.find("BMS1001")->status = "CLOSED";
+
+    CHECK(
+        f.svc.validateTransferAmount("BMS1001", 100)
+        == TxnStatus::ACCOUNT_CLOSED
+    );
+}
+
+static void test_transfer_amount_validation_changes_no_data_and_audits_failures() {
+    Fixture f;
+
+    f.svc.validateTransferAmount("BMS1001", 100001);
+
+    CHECK_EQ(f.balance(), 100000);
+    CHECK_EQ(f.txns.all().size(), 0u);
+
+    const std::string log =
+        bms::test::readFile(f.dir.file("audit.log"));
+
+    CHECK(
+        log.find("|TRANSFER_VALIDATION|BMS1001|FAILED_INSUFFICIENT_FUNDS|")
+        != std::string::npos
+    );
+}
+
+// ------------------------------------------------------------
+// Issue #34: Fund transfer between accounts
+// ------------------------------------------------------------
+
+static void test_transfer_moves_funds_between_accounts() {
+    Fixture f;
+    addSecondAccount(f);
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 30000);
+
+    CHECK(result.status == TxnStatus::OK);
+    CHECK_EQ(f.balance(), 70000);
+
+    const auto destBalance = f.svc.getBalance("BMS1002");
+    CHECK_EQ(destBalance.newBalancePaise, 80000);
+}
+
+static void test_transfer_rejects_invalid_accounts() {
+    Fixture f;
+    addSecondAccount(f);
+
+    CHECK(
+        f.svc.transfer("BMS1001", "BMS1001", 1000).status
+        == TxnStatus::INVALID_INPUT
+    );
+    CHECK(
+        f.svc.transfer("NOPE", "BMS1002", 1000).status
+        == TxnStatus::NOT_FOUND
+    );
+    CHECK_EQ(f.balance(), 100000);
+}
+
+static void test_transfer_rejects_insufficient_funds() {
+    Fixture f;
+    addSecondAccount(f);
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 100001);
+
+    CHECK(result.status == TxnStatus::INSUFFICIENT_FUNDS);
+    CHECK_EQ(f.balance(), 100000);
+
+    const auto destBalance = f.svc.getBalance("BMS1002");
+    CHECK_EQ(destBalance.newBalancePaise, 50000);
+}
+
+static void test_transfer_exact_balance_succeeds() {
+    Fixture f;
+    addSecondAccount(f);
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 100000);
+
+    CHECK(result.status == TxnStatus::OK);
+    CHECK_EQ(f.balance(), 0);
+
+    const auto destBalance = f.svc.getBalance("BMS1002");
+    CHECK_EQ(destBalance.newBalancePaise, 150000);
+}
+
+static void test_transfer_rejects_closed_destination() {
+    Fixture f;
+    addSecondAccount(f);
+
+    f.accounts.find("BMS1002")->status = "CLOSED";
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 1000);
+
+    CHECK(result.status == TxnStatus::ACCOUNT_CLOSED);
+    CHECK_EQ(f.balance(), 100000);
+}
+
+static void test_transfer_records_both_legs_in_history() {
+    Fixture f;
+    addSecondAccount(f);
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 10000);
+
+    CHECK(result.status == TxnStatus::OK);
+
+    const auto& all = f.txns.all();
+
+    // Each leg writes PENDING + COMMITTED, so two legs = 4 records.
+    CHECK_EQ(all.size(), 4u);
+    CHECK(f.txns.pending().empty());
+}
+
+static void test_transfer_survives_repository_reload() {
+    Fixture f;
+    addSecondAccount(f);
+
+    CHECK(
+        f.svc.transfer("BMS1001", "BMS1002", 20000).status
+        == TxnStatus::OK
+    );
+
+    CHECK_EQ(f.balanceOnDisk(), 80000);
+
+    AccountRepository reloaded(f.dir.file("accounts.dat"));
+    CHECK(reloaded.load() == LoadStatus::OK);
+
+    const auto* dest = reloaded.find("BMS1002");
+    CHECK(dest != nullptr);
+    CHECK_EQ(dest->balancePaise, 70000);
+}
+
+static void test_transfer_audit_log_records_success() {
+    Fixture f;
+    addSecondAccount(f);
+
+    CHECK(
+        f.svc.transfer("BMS1001", "BMS1002", 5000).status
+        == TxnStatus::OK
+    );
+
+    const std::string log =
+        bms::test::readFile(f.dir.file("audit.log"));
+
+    CHECK(
+        log.find("|TRANSFER|BMS1001|SUCCESS|") != std::string::npos
+    );
+}
+
+// ------------------------------------------------------------
+// Issue #35: Transfer consistency and rollback on failure
+// ------------------------------------------------------------
+
+static void test_transfer_rolls_back_source_on_destination_failure() {
+    Fixture f;
+    addSecondAccount(f);
+
+    int clockCalls = 0;
+
+    TransactionService svc(
+        f.accounts, f.txns, f.config, f.audit,
+        [&f, &clockCalls] {
+            ++clockCalls;
+
+            // The 2nd clock_() call happens at the start of the
+            // credit leg's finish(), just before its save. Force
+            // that save to fail so the debit leg (1st call) has
+            // already succeeded, triggering the reversal.
+            if (clockCalls == 2) {
+                std::filesystem::create_directory(
+                    f.dir.file("accounts.dat.tmp")
+                );
+            }
+
+            // The 3rd clock_() call happens at the start of the
+            // reversal leg's finish(). Clear the blocking path
+            // first so the reversal's own save can succeed.
+            if (clockCalls == 3) {
+                std::filesystem::remove(
+                    f.dir.file("accounts.dat.tmp")
+                );
+            }
+
+            return f.now;
+        }
+    );
+
+    const auto result = svc.transfer("BMS1001", "BMS1002", 30000);
+
+    CHECK(result.status == TxnStatus::STORAGE_FAILURE);
+
+    // Consistency: source balance must be fully restored, and
+    // the destination must never have been credited.
+    CHECK_EQ(svc.getBalance("BMS1001").newBalancePaise, 100000);
+    CHECK_EQ(svc.getBalance("BMS1002").newBalancePaise, 50000);
+    CHECK_EQ(f.balanceOnDisk(), 100000);
+
+    const std::string log =
+        bms::test::readFile(f.dir.file("audit.log"));
+
+    CHECK(
+        log.find("|TRANSFER|BMS1001|FAILED_STORAGE_FAILURE|")
+        != std::string::npos
+    );
+    CHECK(
+        log.find("rolledBack=true") != std::string::npos
+    );
+}
+
+static void test_transfer_no_partial_effect_on_upfront_validation_failure() {
+    Fixture f;
+    addSecondAccount(f);
+
+    // Validation fails before either leg runs — nothing should
+    // be touched at all.
+    f.accounts.find("BMS1002")->status = "CLOSED";
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 1000);
+
+    CHECK(result.status == TxnStatus::ACCOUNT_CLOSED);
+    CHECK_EQ(f.balance(), 100000);
+    CHECK_EQ(f.svc.getBalance("BMS1002").newBalancePaise, 50000);
+    CHECK_EQ(f.txns.all().size(), 0u);
+}
+
+static void test_transfer_both_legs_atomic_on_success() {
+    Fixture f;
+    addSecondAccount(f);
+
+    const auto result =
+        f.svc.transfer("BMS1001", "BMS1002", 40000);
+
+    CHECK(result.status == TxnStatus::OK);
+
+    // Total money in the system is conserved.
+    const long long total =
+        f.svc.getBalance("BMS1001").newBalancePaise +
+        f.svc.getBalance("BMS1002").newBalancePaise;
+
+    CHECK_EQ(total, 150000);
+}
+
+// ------------------------------------------------------------
+// Issue #36: Escalate when transfer rollback itself fails
+// ------------------------------------------------------------
+
+static void test_transfer_escalates_when_reversal_also_fails() {
+    Fixture f;
+    addSecondAccount(f);
+
+    int clockCalls = 0;
+
+    TransactionService svc(
+        f.accounts, f.txns, f.config, f.audit,
+        [&f, &clockCalls] {
+            ++clockCalls;
+
+            // 2nd call: credit leg's finish() -> force it to fail.
+            // 3rd call: reversal's finish() -> leave it blocked too,
+            // so the reversal also fails (double failure).
+            if (clockCalls == 2) {
+                std::filesystem::create_directory(
+                    f.dir.file("accounts.dat.tmp")
+                );
+            }
+
+            return f.now;
+        }
+    );
+
+    const auto result = svc.transfer("BMS1001", "BMS1002", 30000);
+
+    CHECK(result.status == TxnStatus::STORAGE_FAILURE);
+
+    const std::string log =
+        bms::test::readFile(f.dir.file("audit.log"));
+
+    CHECK(
+        log.find("|TRANSFER_RECONCILIATION_REQUIRED|BMS1001|")
+        != std::string::npos
+    );
+    CHECK(
+        log.find("rolledBack=false") != std::string::npos
+    );
+
+    // Clean up the blocking path so later tests in this process
+    // (if any reuse the same dir) aren't affected.
+    std::filesystem::remove(f.dir.file("accounts.dat.tmp"));
+}
+
 int main() {
     test_deposit_updates_balance_in_memory_and_file();
     test_deposit_unknown_and_closed_account();
@@ -607,5 +1062,36 @@ int main() {
     test_audit_log_records_success_and_failure();
     test_banking_operations_survive_repository_reload();
 
+    test_transfer_validation_accepts_two_active_accounts();
+    test_transfer_validation_rejects_unknown_accounts();
+    test_transfer_validation_rejects_same_account();
+    test_transfer_validation_rejects_empty_account_numbers();
+    test_transfer_validation_rejects_closed_accounts();
+    test_transfer_validation_changes_no_data_and_audits_failures();
+
+    test_transfer_amount_validation_accepts_valid_amount();
+    test_transfer_amount_validation_accepts_exact_balance();
+    test_transfer_amount_validation_rejects_zero_and_negative();
+    test_transfer_amount_validation_rejects_over_max();
+    test_transfer_amount_validation_rejects_insufficient_funds();
+    test_transfer_amount_validation_rejects_unknown_account();
+    test_transfer_amount_validation_rejects_closed_account();
+    test_transfer_amount_validation_changes_no_data_and_audits_failures();
+
+    test_transfer_moves_funds_between_accounts();
+    test_transfer_rejects_invalid_accounts();
+    test_transfer_rejects_insufficient_funds();
+    test_transfer_exact_balance_succeeds();
+    test_transfer_rejects_closed_destination();
+    test_transfer_records_both_legs_in_history();
+    test_transfer_survives_repository_reload();
+    test_transfer_audit_log_records_success();
+
+    test_transfer_rolls_back_source_on_destination_failure();
+    test_transfer_no_partial_effect_on_upfront_validation_failure();
+    test_transfer_both_legs_atomic_on_success();
+
+    test_transfer_both_legs_atomic_on_success();
+    test_transfer_escalates_when_reversal_also_fails();
     return bms::test::summary("test_transaction_service");
 }

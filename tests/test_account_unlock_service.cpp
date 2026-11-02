@@ -1,7 +1,8 @@
 #include "service/AccountUnlockService.h"
 #include "infra/PasswordHasher.h"
-#include "TestHarness.h"
+#include "infra/AuditLogger.h"
 #include "TestUtil.h"
+#include "TestHarness.h"
 
 #include <string>
 
@@ -35,8 +36,12 @@ void test_admin_can_unlock_account() {
     SessionManager session;
     session.login("admin", Role::ADMIN, 300);
 
-    AccountUnlockService service(store);
+    AuditLogger audit(dir.file("audit.log"));
+    AccountUnlockService service(store, &audit);
     CHECK(service.unlockAccount(session, "customer") == Status::OK);
+
+    const std::string auditText = bms::test::readFile(dir.file("audit.log"));
+    CHECK(auditText.find("|ACCOUNT_UNLOCKED|admin|SUCCESS|targetUserId=customer") != std::string::npos);
 
     const Credential* unlocked = store.find("customer");
     CHECK(unlocked != nullptr);

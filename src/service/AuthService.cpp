@@ -4,7 +4,8 @@
 using namespace bms::domain;
 using namespace bms::infra;
 namespace bms::service {
-AuthService::AuthService(CredentialStore& store) : store_(store) {}
+AuthService::AuthService(CredentialStore& store, const AuditLogger* auditLogger)
+    : store_(store), auditLogger_(auditLogger) {}
 Status AuthService::changeCredentials(const std::string& userId, 
                                       const std::string& oldPin, 
                                       const std::string& newPin) {
@@ -38,6 +39,7 @@ Status AuthService::changeCredentials(const std::string& userId,
         return Status::STORAGE_FAILURE;
     }
 
+    if (auditLogger_) auditLogger_->log("PIN_CHANGED", userId, "SUCCESS");
     return Status::OK;
 }
 

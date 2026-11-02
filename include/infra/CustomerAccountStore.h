@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <string>
@@ -38,6 +39,7 @@ public:
     ) const;
 
     bool addCustomer(const domain::Customer& customer);
+    bool updateCustomer(const domain::Customer& customer);
     bool addAccount(const domain::Account& account);
 
     bool customerExists(const std::string& customerId) const;
