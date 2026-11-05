@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -13,6 +14,7 @@
 #endif
 
 #include "domain/Status.h"
+#include "domain/Customer.h"
 #include "infra/AccountRepository.h"
 #include "infra/AuditLogger.h"
 #include "infra/Config.h"
@@ -28,6 +30,7 @@
 #include "service/AuditLogReviewService.h"
 #include "service/AccountService.h"
 #include "service/CustomerSearchService.h"
+#include "service/CustomerUpdateService.h"
 #include "service/AccountUnlockService.h"
 #include "service/AuthService.h"
 #include "service/SessionManager.h"
@@ -302,12 +305,42 @@ void showAccountDetails(
     }
 }
 
+bool updateCustomerDetails(
+    const std::string& customerId,
+    const bms::service::SessionManager& session,
+    bms::infra::CustomerAccountStore& customerData,
+    bms::service::CustomerUpdateService& updateService
+) {
+    if (!customerData.load()) {
+        std::cerr << "Could not load customer records.\n";
+        return true;
+    }
+
+    const auto* current = customerData.findCustomer(customerId);
+    if (current == nullptr) {
+        std::cout << "Customer record not found.\n";
+        return true;
+    }
+
+    bms::domain::Customer updated = *current;
+    if (!prompt("New full name: ", updated.name) ||
+        !prompt("New phone (10 digits): ", updated.phone) ||
+        !prompt("New address: ", updated.address)) {
+        return false;
+    }
+
+    showDomainStatus(updateService.updateCustomer(session, updated));
+    return true;
+}
+
 void customerMenu(
     const std::string& userId,
     bms::infra::AccountRepository& accounts,
     bms::service::TransactionService& service,
     bms::infra::CustomerAccountStore& customerData,
-    bms::service::AuthService& authService
+    bms::service::AuthService& authService,
+    bms::service::CustomerUpdateService& updateService,
+    bms::service::SessionManager& session
 ) {
     if (!loadOrReport(accounts, "data/accounts.dat")) return;
 
@@ -330,6 +363,9 @@ void customerMenu(
                   << "3. Withdraw\n"
                   << "4. View account details\n"
                   << "5. Change PIN\n"
+                  << "6. View transaction history\n"
+                  << "7. Transfer to another account\n"
+                  << "8. Update personal details\n"
                   << "0. Logout\n"
                   << "Choice: ";
 
@@ -353,7 +389,53 @@ void customerMenu(
             continue;
         }
 
-        if (choice != "2" && choice != "3") {
+        if (choice == "6") {
+            std::string fromDate;
+            std::string toDate;
+            std::string typeChoice;
+            if (!prompt("From date (YYYY-MM-DD, blank for any): ", fromDate) ||
+                !prompt("To date (YYYY-MM-DD, blank for any): ", toDate)) {
+                return;
+            }
+
+            std::cout << "Transaction type (0 = All, 1 = Deposits, "
+                         "2 = Withdrawals): ";
+            if (!std::getline(std::cin, typeChoice)) return;
+
+            std::optional<bms::domain::TxnType> type;
+            if (typeChoice == "1") {
+                type = bms::domain::TxnType::DEPOSIT;
+            } else if (typeChoice == "2") {
+                type = bms::domain::TxnType::WITHDRAWAL;
+            } else if (typeChoice != "0") {
+                std::cout << "Invalid transaction type.\n";
+                continue;
+            }
+
+            const auto history =
+                service.getHistory(accountNo, fromDate, toDate, type);
+            if (history.status == TxnStatus::INVALID_INPUT) {
+                std::cout << "Invalid date range. Use YYYY-MM-DD and ensure "
+                             "the from date is not after the to date.\n";
+            } else if (history.status != TxnStatus::OK) {
+                std::cout << message(history.status) << '\n';
+            } else {
+                std::cout << bms::service::TransactionService::formatHistory(
+                                 history.records)
+                          << '\n';
+            }
+            continue;
+        }
+
+        if (choice == "8") {
+            if (!updateCustomerDetails(
+                    userId, session, customerData, updateService)) {
+                return;
+            }
+            continue;
+        }
+
+        if (choice != "2" && choice != "3" && choice != "7") {
             std::cout << "Invalid choice.\n";
             continue;
         }
@@ -389,12 +471,22 @@ void customerMenu(
                 amountPaise,
                 mode == "1" ? DepositMode::CASH : DepositMode::CHEQUE
             );
-        } else {
+        } else if (choice == "3") {
             result = service.withdraw(accountNo, amountPaise);
+        } else {
+            std::string destinationAccountNo;
+            if (!prompt("Destination account number: ", destinationAccountNo)) {
+                return;
+            }
+            result = service.transfer(
+                accountNo, destinationAccountNo, amountPaise
+            );
         }
 
         if (result.status == TxnStatus::OK) {
-            std::cout << (choice == "2" ? "Deposit" : "Withdrawal")
+            const char* operation = choice == "2" ? "Deposit" :
+                                    choice == "3" ? "Withdrawal" : "Transfer";
+            std::cout << operation
                       << " successful.\n";
         }
 
@@ -408,6 +500,7 @@ void adminMenu(
     bms::service::AccountUnlockService& unlockService,
     bms::service::SystemStatusService& systemStatusService,
     bms::service::CustomerSearchService& searchService,
+    bms::service::CustomerUpdateService& updateService,
     bms::service::AccountClosureService& closureService,
     bms::service::AuditLogReviewService& auditReviewService,
     bms::service::AuthService& authService,
@@ -426,6 +519,7 @@ void adminMenu(
                   << "5. Search customer and account records\n"
                   << "6. Close customer account\n"
                   << "7. Review audit logs\n"
+                  << "8. Update customer details\n"
                   << "0. Logout\n"
                   << "Choice: ";
 
@@ -660,6 +754,17 @@ void adminMenu(
             continue;
         }
 
+        if (choice == "8") {
+            std::string customerId;
+            if (!prompt("Customer ID to update: ", customerId) ||
+                !updateCustomerDetails(
+                    customerId, session, customerData, updateService)) {
+                session.logout();
+                return;
+            }
+            continue;
+        }
+
         std::cout << "Invalid choice.\n";
     }
 }
@@ -754,6 +859,7 @@ int main() {
     );
 
     bms::service::CustomerSearchService searchService(customerData);
+    bms::service::CustomerUpdateService updateService(customerData);
     bms::service::AccountClosureService closureService(accounts, &audit);
     bms::service::AuditLogReviewService auditReviewService("data/audit.log");
     bms::service::SessionManager session;
@@ -761,9 +867,11 @@ int main() {
     while (true) {
         std::cout << "\nBank Management System\n"
                   << "Customer features after login: balance, deposit, withdraw, "
-                     "account details, change PIN\n"
+                     "transfer, account details, transaction history, profile "
+                     "updates, change PIN\n"
                   << "Admin features after login: create account, unlock login, "
-                     "system status, change PIN, close account\n"
+                     "system status, search records, close account, change PIN, "
+                     "update customer details, review audit logs\n"
                   << "1. Customer login\n"
                   << "2. Admin login\n"
                   << "0. Exit\n"
@@ -788,7 +896,9 @@ int main() {
                     accounts,
                     transactionService,
                     customerData,
-                    authService
+                    authService,
+                    updateService,
+                    session
                 );
 
                 session.logout();
@@ -805,6 +915,7 @@ int main() {
                     unlockService,
                     systemStatusService,
                     searchService,
+                    updateService,
                     closureService,
                     auditReviewService,
                     authService,
