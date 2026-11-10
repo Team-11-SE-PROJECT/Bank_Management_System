@@ -1,4 +1,5 @@
 #include "infra/DataIntegrityValidator.h"
+#include "infra/DataFormat.h"
 #include "TestHarness.h"
 
 using namespace bms::infra;
@@ -88,6 +89,43 @@ static void test_transactions_integrity() {
     CHECK(!res.valid);
 }
 
+static void test_journal_integrity() {
+    JournalEntry entry{
+        "JRN00000001", "TXN00000001", "DEPOSIT", "-", "BMS000001",
+        500, JournalState::PENDING, "2026-10-30 10:00:00"
+    };
+    std::string validLine;
+    std::string error;
+    CHECK(format::serializeJournalEntry(entry, validLine, error));
+
+    auto result = DataIntegrityValidator::validateJournal(
+        "\n#VERSION 1\r\n" + validLine + "\r\n"
+    );
+    CHECK(result.valid);
+    CHECK(result.errors.empty());
+
+    result = DataIntegrityValidator::validateJournal("#VERSION invalid\n");
+    CHECK(!result.valid);
+    CHECK_EQ(result.errors.size(), 1u);
+    if (!result.errors.empty()) {
+        CHECK_EQ(result.errors[0].field, "version");
+    }
+
+    result = DataIntegrityValidator::validateJournal("#VERSION 99\n");
+    CHECK(!result.valid);
+    CHECK_EQ(result.errors.size(), 1u);
+    if (!result.errors.empty()) {
+        CHECK_EQ(result.errors[0].field, "version");
+    }
+
+    result = DataIntegrityValidator::validateJournal("#VERSION 1\nnot-a-journal\n");
+    CHECK(!result.valid);
+    CHECK_EQ(result.errors.size(), 1u);
+    if (!result.errors.empty()) {
+        CHECK_EQ(result.errors[0].field, "record");
+    }
+}
+
 static void test_cross_references() {
     Customer c1{"CUST0001", "Alice", "9876543210", "City"};
     Customer c2{"CUST0002", "Bob", "9876543211", "City"};
@@ -125,6 +163,7 @@ int main() {
     test_customers_integrity();
     test_accounts_integrity();
     test_transactions_integrity();
+    test_journal_integrity();
     test_cross_references();
 
     return bms::test::summary("test_data_integrity");

@@ -296,9 +296,27 @@ The implementation and validation work covers the following functional areas:
 
 ### Running Tests
 
-Use the test instructions provided by the repository's build configuration or test documentation.
+On Windows, open PowerShell in the repository root and compile/run the C++
+test-report program:
 
-The exact test command depends on how the unit-test executable and its dependencies are configured.
+```powershell
+cmake -E make_directory build
+g++ -std=c++17 -O2 .\scripts\test_report.cpp -o .\build\test_report.exe
+.\build\test_report.exe
+```
+
+The C++ program configures and builds the tests, runs the complete CTest suite,
+runs `test_system_validation` independently, collects GCC line and branch
+coverage, and generates three separate PDFs in `Docs`:
+
+- `UNIT_TEST_REPORT.pdf`
+- `SYSTEM_VALIDATION_REPORT.pdf`
+- `CODE_AND_BRANCH_COVERAGE_REPORT.pdf`
+
+Test output is also shown in the terminal.
+
+The report program requires MinGW-w64 GCC (including matching `gcov`), CMake,
+CTest, and Microsoft Edge. Use only synthetic test data.
 
 When extending the project, tests should cover successful operations, invalid inputs, boundary conditions, and failure scenarios.
 

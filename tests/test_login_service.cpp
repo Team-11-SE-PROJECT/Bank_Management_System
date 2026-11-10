@@ -181,6 +181,28 @@ void test_login_attempts_are_audited_without_credentials() {
     CHECK(log.find("secret-pin") == std::string::npos);
 }
 
+void test_storage_errors_are_reported_for_failed_and_successful_login() {
+    bms::test::TempDir dir;
+    const std::string credentialPath = dir.file("credentials.dat");
+    CHECK(std::filesystem::create_directory(credentialPath));
+
+    CredentialStore store(credentialPath);
+    store.upsert(makeCredential("storage-user", Role::CUSTOMER, "1234"));
+
+    AuditLogger audit(dir.file("audit.log"));
+    LoginService service(store, &audit);
+    CHECK(service.authenticate("storage-user", "wrong", Role::CUSTOMER).status
+          == LoginStatus::STORAGE_ERROR);
+    CHECK(service.authenticate("storage-user", "1234", Role::CUSTOMER).status
+          == LoginStatus::STORAGE_ERROR);
+
+    const std::string log = bms::test::readFile(dir.file("audit.log"));
+    CHECK(log.find("|LOGIN|storage-user|STORAGE_ERROR|reason=FAILED_ATTEMPT_SAVE")
+          != std::string::npos);
+    CHECK(log.find("|LOGIN|storage-user|STORAGE_ERROR|reason=SUCCESS_STATE_SAVE")
+          != std::string::npos);
+}
+
 } // namespace
 
 int main() {
@@ -190,5 +212,6 @@ int main() {
     test_unknown_user_does_not_disclose_attempts();
     test_authenticated_sessions_enforce_role_access();
     test_login_attempts_are_audited_without_credentials();
+    test_storage_errors_are_reported_for_failed_and_successful_login();
     return bms::test::summary("test_login_service");
 }

@@ -65,6 +65,7 @@ add_test(NAME test_account_number_generator COMMAND test_account_number_generato
 
 add_executable(test_account_details_service test_account_details_service.cpp)
 target_link_libraries(test_account_details_service PRIVATE bms_core)
+target_include_directories(test_account_details_service PRIVATE "${CMAKE_SOURCE_DIR}/tests")
 add_test(NAME test_account_details_service COMMAND test_account_details_service)
 
 add_executable(test_data_format test_data_format.cpp)
@@ -124,3 +125,8 @@ add_executable(test_transaction_history test_transaction_history.cpp)
 target_link_libraries(test_transaction_history PRIVATE bms_core)
 target_include_directories(test_transaction_history PRIVATE "${CMAKE_SOURCE_DIR}/tests")
 add_test(NAME test_transaction_history COMMAND test_transaction_history)
+
+add_executable(test_system_validation test_system_validation.cpp)
+target_link_libraries(test_system_validation PRIVATE bms_core)
+target_include_directories(test_system_validation PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_system_validation COMMAND test_system_validation)

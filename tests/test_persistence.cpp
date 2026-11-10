@@ -1,4 +1,3 @@
-#include <filesystem>
 #include <fstream>
 #include <string>
 
@@ -14,25 +13,17 @@
 #include "service/AccountService.h"
 #include "service/TransactionService.h"
 #include "TestHarness.h"
+#include "TestUtil.h"
 
-namespace fs = std::filesystem;
 using namespace bms::infra;
 using namespace bms::domain;
 using namespace bms::service;
 
-static const std::string kTestDir = "build-validate/test_persistence_data";
-
-static void cleanup() {
-    std::error_code ec;
-    fs::remove_all(kTestDir, ec);
-    fs::create_directories(kTestDir, ec);
-}
-
 static void test_account_creation_persistence() {
-    cleanup();
-    std::string custPath = kTestDir + "/customers.dat";
-    std::string accPath = kTestDir + "/accounts.dat";
-    std::string credPath = kTestDir + "/credentials.dat";
+    bms::test::TempDir dir;
+    std::string custPath = dir.file("customers.dat");
+    std::string accPath = dir.file("accounts.dat");
+    std::string credPath = dir.file("credentials.dat");
 
     CredentialStore credStore(credPath);
     CustomerAccountStore store(custPath, accPath);
@@ -96,10 +87,10 @@ static void test_account_creation_persistence() {
 }
 
 static void test_transaction_persistence() {
-    cleanup();
-    std::string accPath = kTestDir + "/accounts.dat";
-    std::string txnPath = kTestDir + "/transactions.dat";
-    std::string auditPath = kTestDir + "/audit.log";
+    bms::test::TempDir dir;
+    std::string accPath = dir.file("accounts.dat");
+    std::string txnPath = dir.file("transactions.dat");
+    std::string auditPath = dir.file("audit.log");
 
     AccountRepository accRepo(accPath);
     TransactionRepository txnRepo(txnPath);
@@ -160,6 +151,5 @@ int main() {
     test_account_creation_persistence();
     test_transaction_persistence();
 
-    cleanup();
     return bms::test::summary("test_persistence");
 }
