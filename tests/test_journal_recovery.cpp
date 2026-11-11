@@ -246,10 +246,167 @@ static void test_idempotent_recovery() {
     CHECK_EQ(txnRepo.all().size(), 2U);
 }
 
+static void test_recovery_reconciles_pending_and_applied_entries() {
+    cleanup();
+    const std::string accPath = kTestDir + "/accounts.dat";
+    const std::string txnPath = kTestDir + "/transactions.dat";
+    const std::string jrnPath = kTestDir + "/journal.dat";
+
+    AccountRepository accounts(accPath);
+    Account first;
+    first.accountNo = "1000000001";
+    first.customerId = "CUST1001";
+    first.balancePaise = 70000;
+    accounts.upsert(first);
+
+    Account second;
+    second.accountNo = "1000000002";
+    second.customerId = "CUST1002";
+    second.balancePaise = 100000;
+    accounts.upsert(second);
+    CHECK(accounts.save());
+
+    TransactionRepository transactions(txnPath);
+    CHECK(transactions.append({
+        "TXN00000001", TxnType::DEPOSIT, "1000000001", "CASH",
+        10000, 70000, "2026-03-30 10:00:00", TxnState::COMMITTED
+    }));
+    CHECK(transactions.append({
+        "TXN00000002", TxnType::DEPOSIT, "1000000001", "CASH",
+        5000, 65000, "2026-03-30 10:01:00", TxnState::PENDING
+    }));
+
+    const std::vector<JournalEntry> entries = {
+        {
+            "JRN00000001", "TXN00000001", "DEPOSIT", "-", "1000000001",
+            10000, JournalState::PENDING, "2026-03-30 10:00:00"
+        },
+        {
+            "JRN00000002", "TXN00000002", "DEPOSIT", "-", "1000000001",
+            5000, JournalState::APPLIED, "2026-03-30 10:01:00"
+        },
+        {
+            "JRN00000003", "TXN00000003", "WITHDRAWAL", "-",
+            "1000000002", 20000, JournalState::APPLIED,
+            "2026-03-30 10:02:00"
+        },
+        {
+            "JRN00000004", "TXN00000004", "DEPOSIT", "-", "MISSING",
+            1000, JournalState::APPLIED, "2026-03-30 10:03:00"
+        },
+        {
+            "JRN00000005", "TXN00000005", "DEPOSIT", "-", "1000000001",
+            1000, JournalState::COMMITTED, "2026-03-30 10:04:00"
+        },
+        {
+            "JRN00000006", "TXN00000006", "DEPOSIT", "-", "1000000001",
+            1000, JournalState::ABORTED, "2026-03-30 10:05:00"
+        }
+    };
+
+    std::string journalContents = "#VERSION 1\n";
+    for (const JournalEntry& entry : entries) {
+        std::string line;
+        std::string error;
+        CHECK(format::serializeJournalEntry(entry, line, error));
+        journalContents += line + "\n";
+    }
+    writeFile(jrnPath, journalContents);
+
+    Journal journal(jrnPath);
+    CHECK_EQ(Journal::recover(journal, accounts, transactions), 4);
+
+    const Account* reconciledFirst = accounts.find("1000000001");
+    const Account* reconciledSecond = accounts.find("1000000002");
+    CHECK(reconciledFirst != nullptr);
+    CHECK(reconciledSecond != nullptr);
+    if (reconciledFirst) {
+        CHECK_EQ(reconciledFirst->balancePaise, 65000);
+    }
+    if (reconciledSecond) {
+        CHECK_EQ(reconciledSecond->balancePaise, 80000);
+    }
+
+    CHECK_EQ(transactions.all().size(), 4u);
+    CHECK(transactions.all()[2].state == TxnState::COMMITTED);
+    CHECK_EQ(transactions.all()[2].txnId, "TXN00000002");
+    CHECK(transactions.all()[3].type == TxnType::WITHDRAWAL);
+    CHECK_EQ(transactions.all()[3].balanceAfterPaise, 80000);
+    CHECK_EQ(journal.load(), LoadStatus::OK);
+    CHECK_EQ(journal.entries().size(), 10u);
+    CHECK(journal.entries()[6].state == JournalState::COMMITTED);
+    CHECK(journal.entries()[7].state == JournalState::COMMITTED);
+    CHECK(journal.entries()[8].state == JournalState::COMMITTED);
+    CHECK(journal.entries()[9].state == JournalState::ABORTED);
+}
+
+static void test_recovery_handles_empty_missing_and_corrupt_journals() {
+    cleanup();
+    const std::string accPath = kTestDir + "/accounts.dat";
+    const std::string txnPath = kTestDir + "/transactions.dat";
+    const std::string jrnPath = kTestDir + "/journal.dat";
+    AccountRepository accounts(accPath);
+    TransactionRepository transactions(txnPath);
+
+    Journal missing(jrnPath);
+    CHECK_EQ(Journal::recover(missing, accounts, transactions, nullptr), 0);
+
+    writeFile(jrnPath, "");
+    Journal empty(jrnPath);
+    CHECK_EQ(Journal::recover(empty, accounts, transactions, nullptr), 0);
+
+    writeFile(jrnPath, "#VERSION invalid\n");
+    Journal corrupt(jrnPath);
+    CHECK_EQ(Journal::recover(corrupt, accounts, transactions, nullptr), 0);
+    CHECK(corrupt.load().isOk());
+    CHECK(corrupt.entries().empty());
+}
+
+static void test_recovery_applied_entry_with_existing_commit() {
+    cleanup();
+    const std::string accPath = kTestDir + "/accounts.dat";
+    const std::string txnPath = kTestDir + "/transactions.dat";
+    const std::string jrnPath = kTestDir + "/journal.dat";
+
+    AccountRepository accounts(accPath);
+    Account account;
+    account.accountNo = "1000000001";
+    account.customerId = "CUST1001";
+    account.balancePaise = 90000;
+    accounts.upsert(account);
+    CHECK(accounts.save());
+
+    TransactionRepository transactions(txnPath);
+    CHECK(transactions.append({
+        "TXN00000001", TxnType::DEPOSIT, "1000000001", "CASH",
+        10000, 90000, "2026-03-30 10:00:00", TxnState::COMMITTED
+    }));
+
+    JournalEntry applied{
+        "BAD-ID", "TXN00000001", "DEPOSIT", "-", "1000000001",
+        10000, JournalState::APPLIED, "2026-03-30 10:00:00"
+    };
+    std::string line;
+    std::string error;
+    CHECK(format::serializeJournalEntry(applied, line, error));
+    writeFile(jrnPath, "#VERSION 1\n" + line + "\n");
+
+    Journal journal(jrnPath);
+    CHECK_EQ(Journal::recover(journal, accounts, transactions, nullptr), 1);
+    CHECK_EQ(journal.entries().size(), 2u);
+    CHECK_EQ(journal.entries().back().journalId, "JRN000001");
+    CHECK(journal.entries().back().state == JournalState::COMMITTED);
+    CHECK_EQ(transactions.all().size(), 1u);
+    CHECK_EQ(accounts.find("1000000001")->balancePaise, 90000);
+}
+
 int main() {
     test_pending_crash_recovery();
     test_applied_crash_recovery_deposit();
     test_idempotent_recovery();
+    test_recovery_reconciles_pending_and_applied_entries();
+    test_recovery_handles_empty_missing_and_corrupt_journals();
+    test_recovery_applied_entry_with_existing_commit();
 
     cleanup();
     return bms::test::summary("test_journal_recovery");

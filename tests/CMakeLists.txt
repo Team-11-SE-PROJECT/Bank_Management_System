@@ -130,3 +130,8 @@ add_executable(test_system_validation test_system_validation.cpp)
 target_link_libraries(test_system_validation PRIVATE bms_core)
 target_include_directories(test_system_validation PRIVATE "${CMAKE_SOURCE_DIR}/tests")
 add_test(NAME test_system_validation COMMAND test_system_validation)
+
+add_executable(test_account_service_edges test_account_service_edges.cpp)
+target_link_libraries(test_account_service_edges PRIVATE bms_core)
+target_include_directories(test_account_service_edges PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME test_account_service_edges COMMAND test_account_service_edges)

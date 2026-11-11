@@ -173,6 +173,18 @@ static void test_format_history() {
     CHECK(text.find("1250.50") != std::string::npos);    // amount
     CHECK(text.find("2250.50") != std::string::npos);    // balance after
     CHECK(text.find("2026-10-23 10:00:00") != std::string::npos);
+
+    bms::domain::Transaction negative;
+    negative.txnId = "TXN-NEGATIVE";
+    negative.timestamp = "2026-10-23 10:00:00";
+    negative.type = TxnType::DEPOSIT;
+    negative.counterparty = "CASH";
+    negative.amountPaise = -1;
+    negative.balanceAfterPaise = -100;
+    const std::string negativeText =
+        TransactionService::formatHistory({negative});
+    CHECK(negativeText.find("-0.01") != std::string::npos);
+    CHECK(negativeText.find("-1.00") != std::string::npos);
 }
 // ------------------------------------------------------------
 // Issue #38: filter by date or type
@@ -266,12 +278,28 @@ static void test_filter_invalid_dates_rejected() {
     Fixture f;
     seedThreeDays(f);
 
-    CHECK(f.svc.getHistory("BMS1001", "2026-13-01").status
-          == TxnStatus::INVALID_INPUT);
-    CHECK(f.svc.getHistory("BMS1001", "2026-02-30").status
-          == TxnStatus::INVALID_INPUT);
-    CHECK(f.svc.getHistory("BMS1001", "23-10-2026").status
-          == TxnStatus::INVALID_INPUT);
+    const std::vector<std::string> invalidDates = {
+        "2026-13-01",
+        "2026-00-01",
+        "2026-02-30",
+        "2026-04-31",
+        "2026-02-00",
+        "2026/10/22",
+        "2026-10/22",
+        "2026-1-01",
+        "202x-10-22",
+        "2026-0/22",
+        "2026-:0-22",
+        "0000-01-01",
+        "1900-02-29"
+    };
+    for (const std::string& date : invalidDates) {
+        CHECK(
+            f.svc.getHistory("BMS1001", date).status
+            == TxnStatus::INVALID_INPUT
+        );
+    }
+
     CHECK(f.svc.getHistory("BMS1001", "", "abc").status
           == TxnStatus::INVALID_INPUT);
 
@@ -279,8 +307,10 @@ static void test_filter_invalid_dates_rejected() {
     CHECK(f.svc.getHistory("BMS1001", "2026-10-24", "2026-10-22").status
           == TxnStatus::INVALID_INPUT);
 
-    // Leap day is valid.
+    // Both ordinary leap years and century leap years are valid.
     CHECK(f.svc.getHistory("BMS1001", "2028-02-29").status
+          == TxnStatus::OK);
+    CHECK(f.svc.getHistory("BMS1001", "2000-02-29").status
           == TxnStatus::OK);
 }
 int main() {

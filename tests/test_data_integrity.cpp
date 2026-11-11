@@ -37,6 +37,23 @@ static void test_customers_integrity() {
         "CUST0001|John Doe|12345|Bangalore\n";
     res = DataIntegrityValidator::validateCustomers(badPhone);
     CHECK(!res.valid);
+
+    res = DataIntegrityValidator::validateCustomers("#VERSION invalid\n");
+    CHECK(!res.valid);
+    CHECK_EQ(res.errors[0].field, "version");
+
+    const std::string longCustomerId =
+        "CUST123456789012345678901234567890|John Doe|9876543210|City\n";
+    res = DataIntegrityValidator::validateCustomers(longCustomerId);
+    CHECK(!res.valid);
+    CHECK_EQ(res.errors[0].field, "customerId");
+
+    res = DataIntegrityValidator::validateCustomers(
+        "\r\n#VERSION 99\r\n"
+        "CUST0001|John Doe|9876543210|City\r\n"
+    );
+    CHECK(!res.valid);
+    CHECK_EQ(res.errors[0].field, "version");
 }
 
 static void test_accounts_integrity() {
@@ -67,6 +84,28 @@ static void test_accounts_integrity() {
     res = DataIntegrityValidator::validateAccounts(dupAcc);
     CHECK(!res.valid);
     CHECK_EQ(res.errors[0].field, "accountNo");
+
+    const std::string invalidAndLongAccountNumbers =
+        "BMS-00001|CUST0001|100000|ACTIVE|0|-\n"
+        "BMS123456789012345678901234567890|CUST0001|100000|ACTIVE|0|-\n";
+    res = DataIntegrityValidator::validateAccounts(
+        invalidAndLongAccountNumbers
+    );
+    CHECK(!res.valid);
+    CHECK_EQ(res.errors.size(), 2u);
+
+    res = DataIntegrityValidator::validateAccounts(
+        "#VERSION invalid\nBMS000001|CUST0001|100|ACTIVE|0|-\n"
+    );
+    CHECK(!res.valid);
+    CHECK_EQ(res.errors[0].field, "version");
+
+    res = DataIntegrityValidator::validateAccounts(
+        "\r\n#VERSION 99\r\n"
+        "BMS000001|CUST0001|100|ACTIVE|0|-\r\n"
+    );
+    CHECK(!res.valid);
+    CHECK_EQ(res.errors[0].field, "version");
 }
 
 static void test_transactions_integrity() {
@@ -87,6 +126,25 @@ static void test_transactions_integrity() {
         "TXN000001|DEPOSIT|BMS000001|CASH|5000|150000|not-a-timestamp|COMMITTED\n";
     res = DataIntegrityValidator::validateTransactions(badTs);
     CHECK(!res.valid);
+
+    res = DataIntegrityValidator::validateTransactions("#VERSION invalid\n");
+    CHECK(!res.valid);
+    CHECK_EQ(res.errors[0].field, "version");
+
+    res = DataIntegrityValidator::validateTransactions(
+        "\r\n#VERSION 1\r\n"
+        "TXN000001|DEPOSIT|BMS000001|CASH|50000|150000|"
+        "2026-10-30 10:00:00|COMMITTED\r\n"
+    );
+    CHECK(res.valid);
+
+    res = DataIntegrityValidator::validateTransactions(
+        "#VERSION 99\n"
+        "TXN000001|DEPOSIT|BMS000001|CASH|5000|150000|"
+        "2026-10-30 10:00:00|COMMITTED\n"
+    );
+    CHECK(!res.valid);
+    CHECK_EQ(res.errors[0].field, "version");
 }
 
 static void test_journal_integrity() {
@@ -124,6 +182,12 @@ static void test_journal_integrity() {
     if (!result.errors.empty()) {
         CHECK_EQ(result.errors[0].field, "record");
     }
+
+    result = DataIntegrityValidator::validateJournal(
+        "\r\n#VERSION 99\r\n" + validLine + "\r\n"
+    );
+    CHECK(!result.valid);
+    CHECK_EQ(result.errors[0].field, "version");
 }
 
 static void test_cross_references() {

@@ -7,6 +7,7 @@
 #include "TestUtil.h"
 
 #include <filesystem>
+#include <limits>
 #include <string>
 
 using namespace bms::infra;
@@ -150,6 +151,17 @@ static void test_invalid_deposit_amounts_rejected_balance_unchanged() {
 
     CHECK_EQ(f.balance(), 100000);
     CHECK_EQ(f.balanceOnDisk(), 100000);
+    CHECK_EQ(f.txns.all().size(), 0u);
+}
+
+static void test_deposit_rejects_balance_overflow() {
+    Fixture f(std::numeric_limits<long long>::max() - 10);
+
+    const auto result =
+        f.svc.deposit("BMS1001", 11, DepositMode::CASH);
+
+    CHECK(result.status == TxnStatus::INVALID_INPUT);
+    CHECK_EQ(f.balance(), std::numeric_limits<long long>::max() - 10);
     CHECK_EQ(f.txns.all().size(), 0u);
 }
 
@@ -446,6 +458,46 @@ static void test_storage_failure_rolls_back() {
     CHECK(f.txns.pending().empty());
     CHECK(!f.txns.all().empty());
     CHECK(f.txns.all().back().state == TxnState::ABORTED);
+}
+
+static void test_journal_and_transaction_append_failures() {
+    {
+        Fixture f;
+        const std::string journalPath = f.dir.file("journal.dat");
+        std::filesystem::create_directory(journalPath);
+        Journal journal(journalPath);
+        TransactionService service(
+            f.accounts, f.txns, f.config, f.audit, [&f] { return f.now; },
+            &journal
+        );
+
+        const auto result =
+            service.deposit("BMS1001", 100, DepositMode::CASH);
+        CHECK(result.status == TxnStatus::STORAGE_FAILURE);
+        CHECK(f.txns.all().empty());
+        CHECK_EQ(f.balance(), 100000);
+    }
+
+    {
+        Fixture f;
+        const std::string transactionPath = f.dir.file("transactions.dat");
+        std::filesystem::create_directory(transactionPath);
+        TransactionRepository blockedTransactions(transactionPath);
+        Journal journal(f.dir.file("journal.dat"));
+        TransactionService service(
+            f.accounts, blockedTransactions, f.config, f.audit,
+            [&f] { return f.now; }, &journal
+        );
+
+        const auto result =
+            service.deposit("BMS1001", 100, DepositMode::CASH);
+        CHECK(result.status == TxnStatus::STORAGE_FAILURE);
+        CHECK_EQ(f.balance(), 100000);
+        CHECK(journal.load().isOk());
+        CHECK_EQ(journal.entries().size(), 2u);
+        CHECK(journal.entries()[0].state == bms::domain::JournalState::PENDING);
+        CHECK(journal.entries()[1].state == bms::domain::JournalState::ABORTED);
+    }
 }
 
 static void test_audit_log_records_success_and_failure() {
@@ -1035,10 +1087,15 @@ static void test_transfer_escalates_when_reversal_also_fails() {
 }
 
 int main() {
+    CHECK_EQ(
+        std::string(toString(static_cast<TxnStatus>(999))),
+        "STORAGE_FAILURE"
+    );
     test_deposit_updates_balance_in_memory_and_file();
     test_deposit_unknown_and_closed_account();
     test_deposit_smallest_and_largest_valid();
     test_invalid_deposit_amounts_rejected_balance_unchanged();
+    test_deposit_rejects_balance_overflow();
 
     test_withdraw_reduces_balance();
     test_withdraw_invalid_amounts_and_accounts();
@@ -1059,6 +1116,7 @@ int main() {
     test_deposit_mode_cash_is_recorded();
 
     test_storage_failure_rolls_back();
+    test_journal_and_transaction_append_failures();
     test_audit_log_records_success_and_failure();
     test_banking_operations_survive_repository_reload();
 

@@ -313,6 +313,10 @@ coverage, and generates three separate PDFs in `Docs`:
 - `SYSTEM_VALIDATION_REPORT.pdf`
 - `CODE_AND_BRANCH_COVERAGE_REPORT.pdf`
 
+The coverage report presents one aggregate branch-coverage metric. It counts
+non-exception branch outcomes reported by gcov and excludes headers, tests, and
+the interactive `src/main.cpp` entry point.
+
 Test output is also shown in the terminal.
 
 The report program requires MinGW-w64 GCC (including matching `gcov`), CMake,

@@ -31,8 +31,6 @@ struct CoverageResult {
     std::size_t totalLines = 0;
     std::size_t coveredBranches = 0;
     std::size_t totalBranches = 0;
-    std::size_t coveredNonThrowBranches = 0;
-    std::size_t totalNonThrowBranches = 0;
 };
 
 std::string readFile(const fs::path& path) {
@@ -196,16 +194,12 @@ bool parseGcovFile(const fs::path& path, CoverageResult& result) {
     while (std::getline(input, line)) {
         std::smatch branchMatch;
         if (std::regex_search(line, branchMatch, branchLine)) {
-            ++result.totalBranches;
             const bool covered = branchMatch[2].matched &&
                 std::stoull(branchMatch[2].str()) > 0;
-            if (covered) {
-                ++result.coveredBranches;
-            }
             if (line.find("(throw)") == std::string::npos) {
-                ++result.totalNonThrowBranches;
+                ++result.totalBranches;
                 if (covered) {
-                    ++result.coveredNonThrowBranches;
+                    ++result.coveredBranches;
                 }
             }
             continue;
@@ -296,7 +290,7 @@ std::string testTable(const std::vector<TestResult>& results) {
 
 std::string coverageTable(
     const std::vector<CoverageResult>& results,
-    int metric
+    bool branchCoverage
 ) {
     std::ostringstream html;
     html << "<table><thead><tr><th>Source file</th><th>Covered</th>"
@@ -305,16 +299,12 @@ std::string coverageTable(
     std::size_t coveredTotal = 0;
     std::size_t total = 0;
     for (const CoverageResult& result : results) {
-        const std::size_t covered = metric == 0
-            ? result.coveredLines
-            : metric == 1
-                ? result.coveredBranches
-                : result.coveredNonThrowBranches;
-        const std::size_t count = metric == 0
-            ? result.totalLines
-            : metric == 1
-                ? result.totalBranches
-                : result.totalNonThrowBranches;
+        const std::size_t covered = branchCoverage
+            ? result.coveredBranches
+            : result.coveredLines;
+        const std::size_t count = branchCoverage
+            ? result.totalBranches
+            : result.totalLines;
         coveredTotal += covered;
         total += count;
         html << "<tr><td>" << htmlEscape(result.source) << "</td><td>"
@@ -550,18 +540,13 @@ std::string createCoverageHtml(
          << "<h2>Code Coverage</h2>"
          << "<p>Line coverage is measured in C++ implementation sources; "
             "the interactive src/main.cpp entry point is excluded.</p>"
-         << coverageTable(coverage, 0)
-         << "<h2>Raw GCC Branch Outcomes</h2>"
-         << "<p>Raw gcov counts every compiler-reported branch outcome, "
-            "including exception edges. Headers, tests, and src/main.cpp "
-            "are excluded.</p>"
-         << coverageTable(coverage, 1)
-         << "<h2>Non-Throw Branch Outcomes</h2>"
-         << "<p>This supplemental metric excludes only outcomes explicitly "
-            "marked as throw edges by gcov; it is not a replacement for raw "
-            "branch coverage. Outcomes are counted as covered when taken at "
-            "least once.</p>"
-         << coverageTable(coverage, 2)
+         << coverageTable(coverage, false)
+         << "<h2>Branch Coverage</h2>"
+         << "<p>Branch coverage counts GCC-reported non-exception branch "
+            "outcomes in C++ implementation sources; headers, tests, "
+            "src/main.cpp, and exception-only edges are excluded. An outcome "
+            "is covered when taken at least once.</p>"
+         << coverageTable(coverage, true)
          << "<p class=\"note\">Coverage was collected with GCC gcov after the "
             "instrumented CTest run. A missing or unmeasured source file is "
             "reported as an error instead of being silently omitted.</p>"

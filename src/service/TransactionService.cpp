@@ -42,7 +42,7 @@ bool isValidDate(const std::string& d) {
     const int month = std::stoi(d.substr(5, 2));
     const int day = std::stoi(d.substr(8, 2));
 
-    if (month < 1 || month > 12 || day < 1) return false;
+    if (year < 1 || month < 1 || month > 12 || day < 1) return false;
 
     static const int daysInMonth[] =
         {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
